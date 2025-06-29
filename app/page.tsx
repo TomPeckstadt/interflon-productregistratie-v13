@@ -116,6 +116,11 @@ function ProductRegistrationApp() {
   const [newPurposeName, setNewPurposeName] = useState("")
   const [newCategoryName, setNewCategoryName] = useState("")
 
+  // Auth user management states - NIEUWE TOEVOEGING
+  const [newUserEmail, setNewUserEmail] = useState("")
+  const [newUserPassword, setNewUserPassword] = useState("")
+  const [authUsers, setAuthUsers] = useState<any[]>([])
+
   // Edit states
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [originalProduct, setOriginalProduct] = useState<Product | null>(null)
@@ -1053,6 +1058,52 @@ function ProductRegistrationApp() {
     }
   }
 
+  const addNewUserWithAuth = async () => {
+    if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) {
+      setImportError("Vul alle velden in")
+      setTimeout(() => setImportError(""), 3000)
+      return
+    }
+
+    if (newUserPassword.length < 6) {
+      setImportError("Wachtwoord moet minimaal 6 tekens lang zijn")
+      setTimeout(() => setImportError(""), 3000)
+      return
+    }
+
+    try {
+      setImportMessage("👤 Bezig met aanmaken gebruiker en inlog-account...")
+
+      // Eerst de auth user aanmaken in Supabase
+      const { createAuthUser } = await import("@/lib/supabase")
+      const result = await createAuthUser(newUserEmail.trim(), newUserPassword, newUserName.trim())
+
+      if (result.error) {
+        console.error("Error creating auth user:", result.error)
+        setImportError(`Fout bij aanmaken: ${result.error.message || "Onbekende fout"}`)
+        setTimeout(() => setImportError(""), 5000)
+      } else {
+        setImportMessage("✅ Gebruiker en inlog-account succesvol aangemaakt!")
+        setTimeout(() => setImportMessage(""), 3000)
+
+        // Reset form
+        setNewUserName("")
+        setNewUserEmail("")
+        setNewUserPassword("")
+
+        // Refresh de users lijst
+        const refreshResult = await fetchUsers()
+        if (refreshResult.data) {
+          setUsers(refreshResult.data)
+        }
+      }
+    } catch (error) {
+      console.error("Exception creating auth user:", error)
+      setImportError("Er ging iets mis bij het aanmaken van de gebruiker")
+      setTimeout(() => setImportError(""), 3000)
+    }
+  }
+
   const addNewProduct = async () => {
     if (newProductName.trim()) {
       const newProduct: Product = {
@@ -1845,14 +1896,70 @@ function ProductRegistrationApp() {
             <Card className="shadow-sm">
               <CardHeader className="bg-gradient-to-r from-green-50 to-emerald-50 border-b">
                 <CardTitle className="flex items-center gap-2 text-xl">👥 Gebruikers Beheer</CardTitle>
-                <CardDescription>Beheer gebruikers die producten kunnen registreren</CardDescription>
+                <CardDescription>
+                  Beheer gebruikers die producten kunnen registreren en hun inloggegevens
+                </CardDescription>
               </CardHeader>
               <CardContent className="p-6">
                 <div className="space-y-6">
-                  {/* Add New User Section - Simple version */}
+                  {/* Add New User Section - Uitgebreide versie */}
                   <Card className="border-2 border-dashed border-gray-200">
                     <CardContent className="p-4">
                       <h3 className="text-lg font-semibold mb-4">🆕 Nieuwe Gebruiker Toevoegen</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div>
+                          <Label className="text-sm font-medium">Naam</Label>
+                          <Input
+                            placeholder="Volledige naam"
+                            value={newUserName}
+                            onChange={(e) => setNewUserName(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Email</Label>
+                          <Input
+                            type="email"
+                            placeholder="email@dematic.com"
+                            value={newUserEmail}
+                            onChange={(e) => setNewUserEmail(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Wachtwoord</Label>
+                          <Input
+                            type="password"
+                            placeholder="Minimaal 6 tekens"
+                            value={newUserPassword}
+                            onChange={(e) => setNewUserPassword(e.target.value)}
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <Button
+                            onClick={addNewUserWithAuth}
+                            disabled={
+                              !newUserName.trim() ||
+                              !newUserEmail.trim() ||
+                              !newUserPassword.trim() ||
+                              newUserPassword.length < 6
+                            }
+                            className="w-full flex items-center gap-2"
+                          >
+                            <Plus className="h-4 w-4" />
+                            Gebruiker + Login Toevoegen
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-xs text-gray-600">
+                        <p>💡 Dit maakt zowel een app-gebruiker als een inlog-account aan in Supabase</p>
+                        <p>🔒 Wachtwoord moet minimaal 6 tekens lang zijn</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Bestaande eenvoudige toevoeg sectie */}
+                  <Card className="border border-gray-200">
+                    <CardContent className="p-4">
+                      <h3 className="text-lg font-semibold mb-4">➕ Snelle Gebruiker Toevoegen (alleen app)</h3>
                       <div className="flex gap-4">
                         <div className="flex-1">
                           <Label className="text-sm font-medium">Naam</Label>
@@ -1870,17 +1977,17 @@ function ProductRegistrationApp() {
                             className="flex items-center gap-2"
                           >
                             <Plus className="h-4 w-4" />
-                            Gebruiker Toevoegen
+                            Alleen App Gebruiker
                           </Button>
                         </div>
                       </div>
                       <div className="mt-2 text-xs text-gray-600">
-                        <p>💡 Dit voegt een gebruiker toe die producten kan registreren</p>
+                        <p>💡 Dit voegt alleen een gebruiker toe die producten kan registreren (geen login)</p>
                       </div>
                     </CardContent>
                   </Card>
 
-                  {/* Search Users */}
+                  {/* Rest van de gebruikers lijst blijft hetzelfde */}
                   <div className="space-y-2">
                     <div className="flex items-center gap-4 mb-4">
                       <Label className="text-sm font-medium">Zoeken:</Label>
