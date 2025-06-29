@@ -848,6 +848,142 @@ export const deleteCategory = async (id: string) => {
   }
 }
 
+// NEW: Supabase Auth Integration Functions
+export const createAuthUser = async (email: string, password: string, name: string) => {
+  if (!supabase) {
+    console.log("🔐 No Supabase - mock create auth user:", { email, name })
+    return { data: { user: { id: "mock-id", email, name } }, error: null }
+  }
+
+  try {
+    console.log("🔐 Creating auth user in Supabase:", { email, name })
+
+    // Create user in Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      user_metadata: {
+        name: name,
+      },
+      email_confirm: true, // Auto-confirm email for internal users
+    })
+
+    if (authError) {
+      console.error("❌ Error creating auth user:", authError)
+      return { data: null, error: authError }
+    }
+
+    console.log("✅ Auth user created successfully")
+
+    // Also add to users table for app functionality
+    const userResult = await saveUser(name)
+
+    return {
+      data: {
+        user: authData.user,
+        appUser: userResult.data,
+      },
+      error: null,
+    }
+  } catch (error) {
+    console.error("❌ Exception in createAuthUser:", error)
+    return { data: null, error }
+  }
+}
+
+export const deleteAuthUser = async (userId: string) => {
+  if (!supabase) {
+    console.log("🔐 No Supabase - mock delete auth user:", userId)
+    return { error: null }
+  }
+
+  try {
+    console.log("🔐 Deleting auth user from Supabase:", userId)
+
+    const { error } = await supabase.auth.admin.deleteUser(userId)
+
+    if (error) {
+      console.error("❌ Error deleting auth user:", error)
+      return { error }
+    }
+
+    console.log("✅ Auth user deleted successfully")
+    return { error: null }
+  } catch (error) {
+    console.error("❌ Exception in deleteAuthUser:", error)
+    return { error }
+  }
+}
+
+export const fetchAuthUsers = async () => {
+  if (!supabase) {
+    console.log("🔐 No Supabase - mock fetch auth users")
+    return { data: [], error: null }
+  }
+
+  try {
+    console.log("🔐 Fetching auth users from Supabase...")
+
+    const { data, error } = await supabase.auth.admin.listUsers()
+
+    if (error) {
+      console.error("❌ Error fetching auth users:", error)
+      return { data: [], error }
+    }
+
+    const authUsers = data.users.map((user) => ({
+      id: user.id,
+      email: user.email || "",
+      name: user.user_metadata?.name || user.email?.split("@")[0] || "Unknown",
+      created_at: user.created_at,
+    }))
+
+    console.log(`🔐 Fetched ${authUsers.length} auth users`)
+    return { data: authUsers, error: null }
+  } catch (error) {
+    console.error("❌ Exception in fetchAuthUsers:", error)
+    return { data: [], error }
+  }
+}
+
+export const updateAuthUser = async (userId: string, updates: { email?: string; name?: string; password?: string }) => {
+  if (!supabase) {
+    console.log("🔐 No Supabase - mock update auth user:", { userId, updates })
+    return { data: null, error: null }
+  }
+
+  try {
+    console.log("🔐 Updating auth user in Supabase:", { userId, updates })
+
+    const updateData: any = {}
+
+    if (updates.email) {
+      updateData.email = updates.email
+    }
+
+    if (updates.password) {
+      updateData.password = updates.password
+    }
+
+    if (updates.name) {
+      updateData.user_metadata = { name: updates.name }
+    }
+
+    const { data, error } = await supabase.auth.admin.updateUserById(userId, updateData)
+
+    if (error) {
+      console.error("❌ Error updating auth user:", error)
+      return { data: null, error }
+    }
+
+    console.log("✅ Auth user updated successfully")
+    return { data: data.user, error: null }
+  } catch (error) {
+    console.error("❌ Exception in updateAuthUser:", error)
+    return { data: null, error }
+  }
+}
+
 // SIMPLIFIED: Real-time subscriptions
 export const subscribeToUsers = (callback: (users: string[]) => void) => {
   if (!supabase) {
