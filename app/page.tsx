@@ -107,6 +107,13 @@ function ProductRegistrationApp() {
   const [categories, setCategories] = useState<Category[]>([])
   const [registrations, setRegistrations] = useState<Registration[]>([])
 
+  // Auth user management states
+  const [authUsers, setAuthUsers] = useState<any[]>([])
+  const [newUserEmail, setNewUserEmail] = useState("")
+  const [newUserPassword, setNewUserPassword] = useState("")
+  const [editingAuthUser, setEditingAuthUser] = useState<any>(null)
+  const [showEditAuthUserDialog, setShowEditAuthUserDialog] = useState(false)
+
   // New item states
   const [newUserName, setNewUserName] = useState("")
   const [newProductName, setNewProductName] = useState("")
@@ -188,6 +195,13 @@ function ProductRegistrationApp() {
       console.log("👤 Set default user:", users[0])
     }
   }, [users, currentUser])
+
+  // Load auth users on mount
+  useEffect(() => {
+    if (isSupabaseConnected) {
+      refreshAuthUsers()
+    }
+  }, [isSupabaseConnected])
 
   const loadAllData = async () => {
     console.log("🔄 Loading all data...")
@@ -503,6 +517,107 @@ function ProductRegistrationApp() {
     }
   }
 
+  // Auth user management functions
+  const refreshAuthUsers = async () => {
+    setImportMessage("🔄 Gebruikers lijst wordt vernieuwd...")
+    const { fetchAuthUsers } = await import("@/lib/supabase")
+    const result = await fetchAuthUsers()
+
+    if (result.error) {
+      setImportError("Fout bij ophalen gebruikers")
+      setTimeout(() => setImportError(""), 3000)
+    } else {
+      setAuthUsers(result.data || [])
+      setImportMessage("✅ Gebruikers lijst vernieuwd!")
+      setTimeout(() => setImportMessage(""), 2000)
+    }
+  }
+
+  const addNewUserWithAuth = async () => {
+    if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) {
+      setImportError("Vul alle velden in")
+      setTimeout(() => setImportError(""), 3000)
+      return
+    }
+
+    if (newUserPassword.length < 6) {
+      setImportError("Wachtwoord moet minimaal 6 tekens lang zijn")
+      setTimeout(() => setImportError(""), 3000)
+      return
+    }
+
+    try {
+      setImportMessage("👤 Bezig met aanmaken gebruiker en inlog-account...")
+
+      const { createAuthUser } = await import("@/lib/supabase")
+      const result = await createAuthUser(newUserEmail.trim(), newUserPassword, newUserName.trim())
+
+      if (result.error) {
+        console.error("Error creating auth user:", result.error)
+        setImportError(`Fout bij aanmaken: ${result.error.message || "Onbekende fout"}`)
+        setTimeout(() => setImportError(""), 5000)
+      } else {
+        setImportMessage("✅ Gebruiker en inlog-account succesvol aangemaakt!")
+        setTimeout(() => setImportMessage(""), 3000)
+
+        // Reset form
+        setNewUserName("")
+        setNewUserEmail("")
+        setNewUserPassword("")
+
+        // Refresh both lists
+        await refreshAuthUsers()
+        const refreshResult = await fetchUsers()
+        if (refreshResult.data) {
+          setUsers(refreshResult.data)
+        }
+      }
+    } catch (error) {
+      console.error("Exception creating auth user:", error)
+      setImportError("Er ging iets mis bij het aanmaken van de gebruiker")
+      setTimeout(() => setImportError(""), 3000)
+    }
+  }
+
+  const removeAuthUser = async (user: any) => {
+    if (
+      !confirm(
+        `Weet je zeker dat je ${user.name} (${user.email}) wilt verwijderen? Dit verwijdert zowel de app-gebruiker als het inlog-account.`,
+      )
+    ) {
+      return
+    }
+
+    try {
+      setImportMessage("🗑️ Bezig met verwijderen gebruiker...")
+
+      const { deleteAuthUser } = await import("@/lib/supabase")
+      const result = await deleteAuthUser(user.id)
+
+      if (result.error) {
+        setImportError("Fout bij verwijderen gebruiker")
+        setTimeout(() => setImportError(""), 3000)
+      } else {
+        // Also remove from app users table
+        await removeUser(user.name)
+
+        setImportMessage("✅ Gebruiker en inlog-account verwijderd!")
+        setTimeout(() => setImportMessage(""), 2000)
+
+        // Refresh list
+        await refreshAuthUsers()
+      }
+    } catch (error) {
+      setImportError("Er ging iets mis bij het verwijderen")
+      setTimeout(() => setImportError(""), 3000)
+    }
+  }
+
+  const handleEditAuthUser = (user: any) => {
+    setEditingAuthUser({ ...user })
+    setShowEditAuthUserDialog(true)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -761,6 +876,7 @@ function ProductRegistrationApp() {
     } else {
       console.log("✅ Category updated successfully")
       setImportMessage("✅ Categorie bijgewerkt!")
+
       setTimeout(() => setImportMessage(""), 2000)
 
       // FORCE LOCAL STATE UPDATE
@@ -2385,25 +2501,67 @@ Voor vragen: bewaar dit instructiebestand!
             <Card className="shadow-sm">
               <CardHeader className="bg-gradient-to-r from-green-50 to-emerald-50 border-b">
                 <CardTitle className="flex items-center gap-2 text-xl">👥 Gebruikers Beheer</CardTitle>
-                <CardDescription>Beheer gebruikers die producten kunnen registreren</CardDescription>
+                <CardDescription>
+                  Beheer gebruikers die producten kunnen registreren en hun inloggegevens
+                </CardDescription>
               </CardHeader>
               <CardContent className="p-6">
                 <div className="space-y-6">
-                  <div className="flex flex-col sm:flex-row gap-4">
-                    <div className="flex-1">
-                      <Input
-                        placeholder="Nieuwe gebruiker naam"
-                        value={newUserName}
-                        onChange={(e) => setNewUserName(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && addNewUser()}
-                      />
-                    </div>
-                    <Button onClick={addNewUser} disabled={!newUserName.trim()} className="flex items-center gap-2">
-                      <Plus className="h-4 w-4" />
-                      Toevoegen
-                    </Button>
-                  </div>
+                  {/* Add New User Section */}
+                  <Card className="border-2 border-dashed border-gray-200">
+                    <CardContent className="p-4">
+                      <h3 className="text-lg font-semibold mb-4">🆕 Nieuwe Gebruiker Toevoegen</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div>
+                          <Label className="text-sm font-medium">Naam</Label>
+                          <Input
+                            placeholder="Volledige naam"
+                            value={newUserName}
+                            onChange={(e) => setNewUserName(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Email</Label>
+                          <Input
+                            type="email"
+                            placeholder="email@dematic.com"
+                            value={newUserEmail}
+                            onChange={(e) => setNewUserEmail(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium">Wachtwoord</Label>
+                          <Input
+                            type="password"
+                            placeholder="Minimaal 6 tekens"
+                            value={newUserPassword}
+                            onChange={(e) => setNewUserPassword(e.target.value)}
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <Button
+                            onClick={addNewUserWithAuth}
+                            disabled={
+                              !newUserName.trim() ||
+                              !newUserEmail.trim() ||
+                              !newUserPassword.trim() ||
+                              newUserPassword.length < 6
+                            }
+                            className="w-full flex items-center gap-2"
+                          >
+                            <Plus className="h-4 w-4" />
+                            Gebruiker + Login Toevoegen
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-xs text-gray-600">
+                        <p>💡 Dit maakt zowel een app-gebruiker als een inlog-account aan in Supabase</p>
+                        <p>🔒 Wachtwoord moet minimaal 6 tekens lang zijn</p>
+                      </div>
+                    </CardContent>
+                  </Card>
 
+                  {/* Search Users */}
                   <div className="space-y-2">
                     <div className="flex items-center gap-4 mb-4">
                       <Label className="text-sm font-medium">Zoeken:</Label>
@@ -2416,40 +2574,72 @@ Voor vragen: bewaar dit instructiebestand!
                           className="pl-10"
                         />
                       </div>
+                      <Button
+                        variant="outline"
+                        onClick={refreshAuthUsers}
+                        className="flex items-center gap-2 bg-transparent"
+                      >
+                        🔄 Ververs Lijst
+                      </Button>
                     </div>
 
-                    <div className="grid gap-2">
-                      {getFilteredAndSortedUsers().map((user) => (
-                        <div key={user} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
-                          <span className="font-medium">{user}</span>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              onClick={() => handleEditUser(user)}
-                              className="bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => removeUser(user)}
-                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {getFilteredAndSortedUsers().length === 0 && (
-                      <div className="text-center py-8 text-gray-500">
-                        <div className="text-4xl mb-2">👤</div>
-                        <p>Geen gebruikers gevonden</p>
+                    {/* Users List */}
+                    <div className="space-y-2">
+                      <div className="text-sm text-gray-600 mb-2">
+                        {authUsers.length > 0
+                          ? `${authUsers.length} gebruikers met inlog-accounts`
+                          : "Geen gebruikers gevonden"}
                       </div>
-                    )}
+
+                      {authUsers.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">
+                          <div className="text-4xl mb-2">👤</div>
+                          <p>Geen gebruikers gevonden</p>
+                          <p className="text-sm mt-2">Voeg hierboven een nieuwe gebruiker toe</p>
+                        </div>
+                      ) : (
+                        <div className="grid gap-3">
+                          {authUsers
+                            .filter(
+                              (user) =>
+                                user.name.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
+                                user.email.toLowerCase().includes(userSearchQuery.toLowerCase()),
+                            )
+                            .map((user) => (
+                              <div
+                                key={user.id}
+                                className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border"
+                              >
+                                <div className="flex-1">
+                                  <div className="font-medium text-gray-900">{user.name}</div>
+                                  <div className="text-sm text-gray-600">{user.email}</div>
+                                  <div className="text-xs text-gray-500">
+                                    Aangemaakt: {new Date(user.created_at).toLocaleDateString("nl-NL")}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => handleEditAuthUser(user)}
+                                    className="bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => removeAuthUser(user)}
+                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -2531,7 +2721,11 @@ Voor vragen: bewaar dit instructiebestand!
                             📥 Import CSV
                           </Button>
                         </div>
-                        <Button variant="outline" onClick={handleExportExcel} className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={handleExportExcel}
+                          className="flex items-center gap-2 bg-transparent"
+                        >
                           📤 Export CSV
                         </Button>
                         <Button
@@ -3400,7 +3594,7 @@ function UserInfo() {
         variant="outline"
         size="sm"
         onClick={signOut}
-        className="flex items-center gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 hover:text-red-700"
+        className="flex items-center gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 hover:text-red-700 bg-transparent"
       >
         Uitloggen
       </Button>
