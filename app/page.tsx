@@ -37,6 +37,7 @@ import {
   testSupabaseConnection,
   uploadPDFToStorage,
   deletePDFFromStorage,
+  createAuthUser,
 } from "@/lib/supabase"
 
 // UI Components
@@ -116,10 +117,9 @@ function ProductRegistrationApp() {
   const [newPurposeName, setNewPurposeName] = useState("")
   const [newCategoryName, setNewCategoryName] = useState("")
 
-  // Auth user management states - NIEUWE TOEVOEGING
+  // Auth user management states
   const [newUserEmail, setNewUserEmail] = useState("")
   const [newUserPassword, setNewUserPassword] = useState("")
-  const [authUsers, setAuthUsers] = useState<any[]>([])
 
   // Edit states
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
@@ -166,11 +166,24 @@ function ProductRegistrationApp() {
   // Product search state
   const [productSearchFilter, setProductSearchFilter] = useState("")
 
-  // Add functions
+  // FIXED: handleSubmit function with better error handling
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
+
+    console.log("🔄 Starting registration submission...")
+    console.log("Form data:", { currentUser, selectedProduct, location, purpose })
+
+    // Validation
+    if (!currentUser || !selectedProduct || !location || !purpose) {
+      console.error("❌ Missing required fields:", { currentUser, selectedProduct, location, purpose })
+      setImportError("Vul alle velden in")
+      setTimeout(() => setImportError(""), 3000)
+      return
+    }
+
     setIsLoading(true)
-    setShowSuccess(false)
+    setImportError("")
+    setImportMessage("")
 
     try {
       const now = new Date()
@@ -178,42 +191,56 @@ function ProductRegistrationApp() {
       const date = now.toISOString().split("T")[0]
       const time = now.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })
 
-      const newRegistration = {
-        id: Date.now().toString(),
-        user: currentUser,
-        product: selectedProduct,
+      // Find the selected product to get QR code
+      const selectedProductObj = products.find((p) => p.name === selectedProduct)
+
+      const registrationData = {
+        user_name: currentUser,
+        product_name: selectedProduct,
         location: location,
         purpose: purpose,
         timestamp: timestamp,
         date: date,
         time: time,
-        qrcode: qrScanResult || undefined,
-        created_at: new Date().toISOString(),
+        qr_code: selectedProductObj?.qrcode || qrScanResult || null,
       }
 
-      const result = await saveRegistration(newRegistration)
+      console.log("📝 Registration data to save:", registrationData)
+
+      const result = await saveRegistration(registrationData)
 
       if (result.error) {
-        setImportError("Fout bij opslaan registratie")
-        setTimeout(() => setImportError(""), 3000)
+        console.error("❌ Error saving registration:", result.error)
+        setImportError(`Fout bij opslaan: ${result.error.message || "Onbekende fout"}`)
+        setTimeout(() => setImportError(""), 5000)
       } else {
-        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-        console.log("🔄 Forcing local registrations refresh...")
+        console.log("✅ Registration saved successfully")
+
+        // Refresh registrations list
         const refreshResult = await fetchRegistrations()
         if (refreshResult.data) {
-          console.log("🔄 Updating local registrations state...")
           setRegistrations(refreshResult.data)
         }
+
+        // Show success message
+        setImportMessage("✅ Product succesvol geregistreerd!")
+        setTimeout(() => setImportMessage(""), 3000)
         setShowSuccess(true)
         setTimeout(() => setShowSuccess(false), 3000)
+
+        // Reset form
+        setSelectedProduct("")
+        setProductSearchQuery("")
+        setLocation("")
+        setPurpose("")
+        setQrScanResult("")
       }
     } catch (error) {
-      setError(`Fout bij opslaan: ${error}`)
+      console.error("❌ Exception in handleSubmit:", error)
+      setImportError(`Onverwachte fout: ${error}`)
+      setTimeout(() => setImportError(""), 5000)
     } finally {
       setIsLoading(false)
-      setQrScanResult("")
-      setSelectedProduct("")
-      setProductSearchQuery("")
     }
   }
 
@@ -226,12 +253,23 @@ function ProductRegistrationApp() {
   }
 
   const handleQrCodeDetected = (code: string) => {
+    console.log("📱 QR Code detected:", code)
     setQrScanResult(code)
     stopQrScanner()
 
     if (qrScanMode === "registration") {
-      setProductSearchQuery(code)
-      setSelectedProduct(code)
+      // Find product by QR code
+      const foundProduct = products.find((p) => p.qrcode === code)
+      if (foundProduct) {
+        setSelectedProduct(foundProduct.name)
+        setProductSearchQuery(foundProduct.name)
+        setImportMessage(`✅ Product gevonden: ${foundProduct.name}`)
+        setTimeout(() => setImportMessage(""), 3000)
+      } else {
+        setProductSearchQuery(code)
+        setImportError(`❌ Geen product gevonden voor QR code: ${code}`)
+        setTimeout(() => setImportError(""), 3000)
+      }
     } else if (qrScanMode === "product-management") {
       setNewProductQrCode(code)
     }
@@ -276,11 +314,9 @@ function ProductRegistrationApp() {
         setImportError("Fout bij opslaan gebruiker")
         setTimeout(() => setImportError(""), 3000)
       } else {
-        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-        console.log("🔄 Forcing local users refresh...")
+        // FORCE LOCAL STATE UPDATE
         const refreshResult = await fetchUsers()
         if (refreshResult.data) {
-          console.log("🔄 Updating local users state...")
           setUsers(refreshResult.data)
         }
         setImportMessage("✅ Gebruiker aangepast!")
@@ -298,16 +334,21 @@ function ProductRegistrationApp() {
 
   const handleSaveProduct = async () => {
     if (editingProduct && originalProduct) {
-      const result = await updateProduct(editingProduct)
+      const updateData = {
+        name: editingProduct.name,
+        qr_code: editingProduct.qrcode || null,
+        category_id: editingProduct.categoryId ? Number.parseInt(editingProduct.categoryId) : null,
+        attachment_url: editingProduct.attachmentUrl || null,
+        attachment_name: editingProduct.attachmentName || null,
+      }
+
+      const result = await updateProduct(originalProduct.id, updateData)
       if (result.error) {
         setImportError("Fout bij opslaan product")
         setTimeout(() => setImportError(""), 3000)
       } else {
-        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-        console.log("🔄 Forcing local products refresh...")
         const refreshResult = await fetchProducts()
         if (refreshResult.data) {
-          console.log("🔄 Updating local products state...")
           setProducts(refreshResult.data)
         }
         setImportMessage("✅ Product aangepast!")
@@ -325,16 +366,13 @@ function ProductRegistrationApp() {
 
   const handleSaveCategory = async () => {
     if (editingCategory && originalCategory) {
-      const result = await updateCategory(editingCategory)
+      const result = await updateCategory(originalCategory.id, { name: editingCategory.name })
       if (result.error) {
         setImportError("Fout bij opslaan categorie")
         setTimeout(() => setImportError(""), 3000)
       } else {
-        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-        console.log("🔄 Forcing local categories refresh...")
         const refreshResult = await fetchCategories()
         if (refreshResult.data) {
-          console.log("🔄 Updating local categories state...")
           setCategories(refreshResult.data)
         }
         setImportMessage("✅ Categorie aangepast!")
@@ -357,11 +395,8 @@ function ProductRegistrationApp() {
         setImportError("Fout bij opslaan locatie")
         setTimeout(() => setImportError(""), 3000)
       } else {
-        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-        console.log("🔄 Forcing local locations refresh...")
         const refreshResult = await fetchLocations()
         if (refreshResult.data) {
-          console.log("🔄 Updating local locations state...")
           setLocations(refreshResult.data)
         }
         setImportMessage("✅ Locatie aangepast!")
@@ -384,11 +419,8 @@ function ProductRegistrationApp() {
         setImportError("Fout bij opslaan doel")
         setTimeout(() => setImportError(""), 3000)
       } else {
-        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-        console.log("🔄 Forcing local purposes refresh...")
         const refreshResult = await fetchPurposes()
         if (refreshResult.data) {
-          console.log("🔄 Updating local purposes state...")
           setPurposes(refreshResult.data)
         }
         setImportMessage("✅ Doel aangepast!")
@@ -431,15 +463,11 @@ function ProductRegistrationApp() {
           if (existingCategory) {
             categoryId = existingCategory.id
           } else {
-            // Create new category if it doesn't exist
             const newCategoryResult = await saveCategory({ name: categoryName })
             if (newCategoryResult.data) {
-              categoryId = newCategoryResult.data[0].id
-              // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-              console.log("🔄 Forcing local categories refresh...")
+              categoryId = newCategoryResult.data.id
               const refreshResult = await fetchCategories()
               if (refreshResult.data) {
-                console.log("🔄 Updating local categories state...")
                 setCategories(refreshResult.data)
               }
             }
@@ -459,11 +487,8 @@ function ProductRegistrationApp() {
         }
       }
 
-      // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-      console.log("🔄 Forcing local products refresh...")
       const refreshResult = await fetchProducts()
       if (refreshResult.data) {
-        console.log("🔄 Updating local products state...")
         setProducts(refreshResult.data)
       }
 
@@ -566,21 +591,21 @@ function ProductRegistrationApp() {
   const generateQRCode = async (product: Product) => {
     const newQrCode = `IF-${product.name.substring(0, 2)}-${Math.random().toString(36).substring(2, 7)}`
 
-    const updatedProduct = {
-      ...product,
-      qrcode: newQrCode,
+    const updateData = {
+      name: product.name,
+      qr_code: newQrCode,
+      category_id: product.categoryId ? Number.parseInt(product.categoryId) : null,
+      attachment_url: product.attachmentUrl || null,
+      attachment_name: product.attachmentName || null,
     }
 
-    const result = await updateProduct(updatedProduct)
+    const result = await updateProduct(product.id, updateData)
     if (result.error) {
       setImportError("Fout bij genereren QR code")
       setTimeout(() => setImportError(""), 3000)
     } else {
-      // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-      console.log("🔄 Forcing local products refresh...")
       const refreshResult = await fetchProducts()
       if (refreshResult.data) {
-        console.log("🔄 Updating local products state...")
         setProducts(refreshResult.data)
       }
       setImportMessage("✅ QR Code gegenereerd!")
@@ -619,29 +644,28 @@ function ProductRegistrationApp() {
     setIsLoading(true)
 
     try {
-      const result = await uploadPDFToStorage(file)
+      const result = await uploadPDFToStorage(file, product.id)
 
       if (result.error) {
         setImportError("Fout bij uploaden bestand")
         setTimeout(() => setImportError(""), 3000)
       } else {
-        const updatedProduct = {
-          ...product,
-          attachmentUrl: result.data.path,
-          attachmentName: file.name,
+        const updateData = {
+          name: product.name,
+          qr_code: product.qrcode || null,
+          category_id: product.categoryId ? Number.parseInt(product.categoryId) : null,
+          attachment_url: result.url,
+          attachment_name: file.name,
         }
 
-        const updateResult = await updateProduct(updatedProduct)
+        const updateResult = await updateProduct(product.id, updateData)
 
         if (updateResult.error) {
           setImportError("Fout bij opslaan product")
           setTimeout(() => setImportError(""), 3000)
         } else {
-          // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-          console.log("🔄 Forcing local products refresh...")
           const refreshResult = await fetchProducts()
           if (refreshResult.data) {
-            console.log("🔄 Updating local products state...")
             setProducts(refreshResult.data)
           }
           setImportMessage("✅ Bestand geupload!")
@@ -665,23 +689,22 @@ function ProductRegistrationApp() {
         setImportError("Fout bij verwijderen bestand")
         setTimeout(() => setImportError(""), 3000)
       } else {
-        const updatedProduct = {
-          ...product,
-          attachmentUrl: null,
-          attachmentName: null,
+        const updateData = {
+          name: product.name,
+          qr_code: product.qrcode || null,
+          category_id: product.categoryId ? Number.parseInt(product.categoryId) : null,
+          attachment_url: null,
+          attachment_name: null,
         }
 
-        const updateResult = await updateProduct(updatedProduct)
+        const updateResult = await updateProduct(product.id, updateData)
 
         if (updateResult.error) {
           setImportError("Fout bij opslaan product")
           setTimeout(() => setImportError(""), 3000)
         } else {
-          // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-          console.log("🔄 Forcing local products refresh...")
           const refreshResult = await fetchProducts()
           if (refreshResult.data) {
-            console.log("🔄 Updating local products state...")
             setProducts(refreshResult.data)
           }
           setImportMessage("✅ Bestand verwijderd!")
@@ -732,7 +755,6 @@ function ProductRegistrationApp() {
       if (supabaseConfigured) {
         console.log("🔄 Testing Supabase connection...")
 
-        // Test connection first
         const connectionTest = await testSupabaseConnection()
 
         if (connectionTest) {
@@ -751,11 +773,10 @@ function ProductRegistrationApp() {
             users: { success: !usersResult.error, count: usersResult.data?.length || 0 },
             products: { success: !productsResult.error, count: productsResult.data?.length || 0 },
             locations: { success: !locationsResult.error, count: locationsResult.data?.length || 0 },
-            purposes: { success: !locationsResult.error, count: locationsResult.data?.length || 0 },
+            purposes: { success: !purposesResult.error, count: purposesResult.data?.length || 0 },
             categories: { success: !categoriesResult.error, count: categoriesResult.data?.length || 0 },
           })
 
-          // Check if we have successful connection
           const hasErrors = usersResult.error || productsResult.error || categoriesResult.error
 
           if (!hasErrors) {
@@ -763,7 +784,6 @@ function ProductRegistrationApp() {
             setIsSupabaseConnected(true)
             setConnectionStatus("Supabase verbonden")
 
-            // Set data from Supabase
             setUsers(usersResult.data || [])
             setProducts(productsResult.data || [])
             setLocations(locationsResult.data || [])
@@ -771,7 +791,6 @@ function ProductRegistrationApp() {
             setCategories(categoriesResult.data || [])
             setRegistrations(registrationsResult.data || [])
 
-            // Set up real-time subscriptions
             setupSubscriptions()
           } else {
             console.log("️ Supabase data fetch failed - using mock data")
@@ -800,7 +819,7 @@ function ProductRegistrationApp() {
       setIsSupabaseConnected(false)
       setConnectionStatus("Mock data actief (error)")
       loadMockData()
-      setIsReady(true) // Still show the app with mock data
+      setIsReady(true)
     }
   }
 
@@ -836,7 +855,6 @@ function ProductRegistrationApp() {
       { id: "3", name: "Onderhoud" },
     ]
 
-    // Mock registrations with realistic data
     const mockRegistrations = [
       {
         id: "1",
@@ -859,127 +877,6 @@ function ProductRegistrationApp() {
         date: "2025-06-15",
         time: "05:48",
         qrcode: "IFLS001",
-      },
-      {
-        id: "3",
-        user: "Tom Peckstadt",
-        product: "Interflon Grease LT2 Lube shuttle 400gr",
-        location: "Warehouse Dematic groot boven",
-        purpose: "Reparatie",
-        timestamp: "2025-06-15T12:53:00Z",
-        date: "2025-06-15",
-        time: "12:53",
-        qrcode: "IFFL002",
-      },
-      {
-        id: "4",
-        user: "Tom Peckstadt",
-        product: "Interflon Grease LT2 Lube shuttle 400gr",
-        location: "Warehouse Dematic groot boven",
-        purpose: "Demonstratie",
-        timestamp: "2025-06-16T20:32:00Z",
-        date: "2025-06-16",
-        time: "20:32",
-        qrcode: "IFFL002",
-      },
-      {
-        id: "5",
-        user: "Sven De Poorter",
-        product: "Interflon Metal Clean spray 500ml",
-        location: "Warehouse Dematic groot boven",
-        purpose: "Presentatie",
-        timestamp: "2025-06-16T21:07:00Z",
-        date: "2025-06-16",
-        time: "21:07",
-        qrcode: "IFLS001",
-      },
-      {
-        id: "6",
-        user: "Tom Peckstadt",
-        product: "Interflon Maintenance Kit",
-        location: "Onderhoud werkplaats",
-        purpose: "Reparatie",
-        timestamp: "2025-06-14T10:15:00Z",
-        date: "2025-06-14",
-        time: "10:15",
-        qrcode: "IFD003",
-      },
-      {
-        id: "7",
-        user: "Siegfried Weverbergh",
-        product: "Interflon Food Lube spray 500ml",
-        location: "Warehouse Interflon",
-        purpose: "Training",
-        timestamp: "2025-06-14T14:22:00Z",
-        date: "2025-06-14",
-        time: "14:22",
-        qrcode: "IFGR004",
-      },
-      {
-        id: "8",
-        user: "Wim Peckstadt",
-        product: "Interflon Foam Cleaner spray 500ml",
-        location: "Warehouse Dematic klein beneden",
-        purpose: "Demonstratie",
-        timestamp: "2025-06-13T09:30:00Z",
-        date: "2025-06-13",
-        time: "09:30",
-        qrcode: "IFMC005",
-      },
-      {
-        id: "9",
-        user: "Sven De Poorter",
-        product: "Interflon Maintenance Kit",
-        location: "Onderhoud werkplaats",
-        purpose: "Reparatie",
-        timestamp: "2025-06-13T16:45:00Z",
-        date: "2025-06-13",
-        time: "16:45",
-        qrcode: "IFD003",
-      },
-      {
-        id: "10",
-        user: "Tom Peckstadt",
-        product: "Interflon Metal Clean spray 500ml",
-        location: "Warehouse Dematic groot boven",
-        purpose: "Presentatie",
-        timestamp: "2025-06-12T11:20:00Z",
-        date: "2025-06-12",
-        time: "11:20",
-        qrcode: "IFLS001",
-      },
-      {
-        id: "11",
-        user: "Siegfried Weverbergh",
-        product: "Interflon Grease LT2 Lube shuttle 400gr",
-        location: "Warehouse Interflon",
-        purpose: "Training",
-        timestamp: "2025-06-12T15:10:00Z",
-        date: "2025-06-12",
-        time: "15:10",
-        qrcode: "IFFL002",
-      },
-      {
-        id: "12",
-        user: "Siegfried Weverbergh",
-        product: "Interflon Food Lube spray 500ml",
-        location: "Warehouse Dematic klein beneden",
-        purpose: "Demonstratie",
-        timestamp: "2025-06-11T08:55:00Z",
-        date: "2025-06-11",
-        time: "08:55",
-        qrcode: "IFGR004",
-      },
-      {
-        id: "13",
-        user: "Tom Peckstadt",
-        product: "Interflon Grease LT2 Lube shuttle 400gr",
-        location: "Warehouse Dematic groot boven",
-        purpose: "Reparatie",
-        timestamp: "2025-06-10T13:40:00Z",
-        date: "2025-06-10",
-        time: "13:40",
-        qrcode: "IFFL002",
       },
     ]
 
@@ -1024,7 +921,6 @@ function ProductRegistrationApp() {
       setRegistrations(newRegistrations)
     })
 
-    // Cleanup subscriptions on unmount
     return () => {
       usersSub?.unsubscribe?.()
       productsSub?.unsubscribe?.()
@@ -1044,11 +940,8 @@ function ProductRegistrationApp() {
         setImportError("Fout bij opslaan gebruiker")
         setTimeout(() => setImportError(""), 3000)
       } else {
-        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-        console.log("🔄 Forcing local users refresh...")
         const refreshResult = await fetchUsers()
         if (refreshResult.data) {
-          console.log("🔄 Updating local users state...")
           setUsers(refreshResult.data)
         }
         setImportMessage("✅ Gebruiker toegevoegd!")
@@ -1074,8 +967,6 @@ function ProductRegistrationApp() {
     try {
       setImportMessage("👤 Bezig met aanmaken gebruiker en inlog-account...")
 
-      // Eerst de auth user aanmaken in Supabase
-      const { createAuthUser } = await import("@/lib/supabase")
       const result = await createAuthUser(newUserEmail.trim(), newUserPassword, newUserName.trim())
 
       if (result.error) {
@@ -1086,12 +977,10 @@ function ProductRegistrationApp() {
         setImportMessage("✅ Gebruiker en inlog-account succesvol aangemaakt!")
         setTimeout(() => setImportMessage(""), 3000)
 
-        // Reset form
         setNewUserName("")
         setNewUserEmail("")
         setNewUserPassword("")
 
-        // Refresh de users lijst
         const refreshResult = await fetchUsers()
         if (refreshResult.data) {
           setUsers(refreshResult.data)
@@ -1119,11 +1008,8 @@ function ProductRegistrationApp() {
         setImportError("Fout bij opslaan product")
         setTimeout(() => setImportError(""), 3000)
       } else {
-        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-        console.log("🔄 Forcing local products refresh...")
         const refreshResult = await fetchProducts()
         if (refreshResult.data) {
-          console.log("🔄 Updating local products state...")
           setProducts(refreshResult.data)
         }
         setImportMessage("✅ Product toegevoegd!")
@@ -1144,11 +1030,8 @@ function ProductRegistrationApp() {
         setImportError("Fout bij opslaan locatie")
         setTimeout(() => setImportError(""), 3000)
       } else {
-        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-        console.log("🔄 Forcing local locations refresh...")
         const refreshResult = await fetchLocations()
         if (refreshResult.data) {
-          console.log("🔄 Updating local locations state...")
           setLocations(refreshResult.data)
         }
         setImportMessage("✅ Locatie toegevoegd!")
@@ -1166,11 +1049,8 @@ function ProductRegistrationApp() {
         setImportError("Fout bij opslaan doel")
         setTimeout(() => setImportError(""), 3000)
       } else {
-        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-        console.log("🔄 Forcing local purposes refresh...")
         const refreshResult = await fetchPurposes()
         if (refreshResult.data) {
-          console.log("🔄 Updating local purposes state...")
           setPurposes(refreshResult.data)
         }
         setImportMessage("✅ Doel toegevoegd!")
@@ -1188,11 +1068,8 @@ function ProductRegistrationApp() {
         setImportError("Fout bij opslaan categorie")
         setTimeout(() => setImportError(""), 3000)
       } else {
-        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
-        console.log("🔄 Forcing local categories refresh...")
         const refreshResult = await fetchCategories()
         if (refreshResult.data) {
-          console.log("🔄 Updating local categories state...")
           setCategories(refreshResult.data)
         }
         setImportMessage("✅ Categorie toegevoegd!")
@@ -1281,7 +1158,6 @@ function ProductRegistrationApp() {
   // Function to get filtered and sorted registrations
   const getFilteredAndSortedRegistrations = () => {
     const filtered = registrations.filter((registration) => {
-      // Search filter
       if (historySearchQuery) {
         const searchLower = historySearchQuery.toLowerCase()
         const matchesSearch =
@@ -1294,17 +1170,14 @@ function ProductRegistrationApp() {
         if (!matchesSearch) return false
       }
 
-      // User filter
       if (selectedHistoryUser !== "all" && registration.user !== selectedHistoryUser) {
         return false
       }
 
-      // Location filter
       if (selectedHistoryLocation !== "all" && registration.location !== selectedHistoryLocation) {
         return false
       }
 
-      // Date range filter
       const registrationDate = new Date(registration.timestamp).toISOString().split("T")[0]
 
       if (dateFrom && registrationDate < dateFrom) {
@@ -1318,7 +1191,6 @@ function ProductRegistrationApp() {
       return true
     })
 
-    // Sort the filtered results
     filtered.sort((a, b) => {
       let comparison = 0
 
@@ -1642,6 +1514,7 @@ function ProductRegistrationApp() {
                             }}
                             onFocus={() => setShowProductDropdown(true)}
                             className="h-10 sm:h-12 pr-10"
+                            required
                           />
                           <div className="absolute inset-y-0 right-0 flex items-center pr-3">
                             <ChevronDown className="h-4 w-4 text-gray-400" />
@@ -1677,9 +1550,7 @@ function ProductRegistrationApp() {
 
                       {selectedProduct && (
                         <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-md">
-                          <div classNameclassName="text-sm font-medium text-green-800">
-                            ✅ Geselecteerd: {selectedProduct}
-                          </div>
+                          <div className="text-sm font-medium text-green-800">✅ Geselecteerd: {selectedProduct}</div>
                           {qrScanResult && <div className="text-xs text-green-600 mt-1">QR Code: {qrScanResult}</div>}
                         </div>
                       )}
@@ -1737,7 +1608,6 @@ function ProductRegistrationApp() {
                 <CardDescription>Overzicht van alle product registraties</CardDescription>
               </CardHeader>
               <CardContent className="p-6">
-                {/* Filters */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -1816,7 +1686,6 @@ function ProductRegistrationApp() {
                   </div>
                 </div>
 
-                {/* Clear filters button */}
                 {(historySearchQuery ||
                   selectedHistoryUser !== "all" ||
                   selectedHistoryLocation !== "all" ||
@@ -1841,12 +1710,10 @@ function ProductRegistrationApp() {
                   </div>
                 )}
 
-                {/* Results count */}
                 <div className="mb-4 text-sm text-gray-600">
                   {getFilteredAndSortedRegistrations().length} van {registrations.length} registraties
                 </div>
 
-                {/* Table */}
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
@@ -1902,7 +1769,6 @@ function ProductRegistrationApp() {
               </CardHeader>
               <CardContent className="p-6">
                 <div className="space-y-6">
-                  {/* Add New User Section - Uitgebreide versie */}
                   <Card className="border-2 border-dashed border-gray-200">
                     <CardContent className="p-4">
                       <h3 className="text-lg font-semibold mb-4">🆕 Nieuwe Gebruiker Toevoegen</h3>
@@ -1956,7 +1822,6 @@ function ProductRegistrationApp() {
                     </CardContent>
                   </Card>
 
-                  {/* Bestaande eenvoudige toevoeg sectie */}
                   <Card className="border border-gray-200">
                     <CardContent className="p-4">
                       <h3 className="text-lg font-semibold mb-4">➕ Snelle Gebruiker Toevoegen (alleen app)</h3>
@@ -1987,7 +1852,6 @@ function ProductRegistrationApp() {
                     </CardContent>
                   </Card>
 
-                  {/* Rest van de gebruikers lijst blijft hetzelfde */}
                   <div className="space-y-2">
                     <div className="flex items-center gap-4 mb-4">
                       <Label className="text-sm font-medium">Zoeken:</Label>
@@ -2002,7 +1866,6 @@ function ProductRegistrationApp() {
                       </div>
                     </div>
 
-                    {/* Users List */}
                     <div className="space-y-2">
                       <div className="text-sm text-gray-600 mb-2">
                         {getFilteredAndSortedUsers().length} van {users.length} gebruikers
@@ -2062,6 +1925,7 @@ function ProductRegistrationApp() {
             </Card>
           </TabsContent>
 
+          {/* Rest of the tabs remain the same... */}
           <TabsContent value="products">
             <Card className="shadow-sm">
               <CardHeader className="bg-gradient-to-r from-amber-50 to-orange-50 border-b">
@@ -2116,7 +1980,6 @@ function ProductRegistrationApp() {
                     </div>
                   </div>
 
-                  {/* Import/Export Section */}
                   <div className="flex flex-col sm:flex-row gap-4 p-4 bg-gray-50 rounded-lg border">
                     <div className="flex-1">
                       <Label className="text-sm font-medium mb-2 block">📊 Import/Export Producten</Label>
@@ -2161,26 +2024,8 @@ function ProductRegistrationApp() {
                         </Button>
                       </div>
                     </div>
-                    <div className="text-xs text-gray-600 flex-1">
-                      <p className="mb-1">
-                        <strong>CSV formaat:</strong>
-                      </p>
-                      <p>• Kolom A: Productnaam</p>
-                      <p>• Kolom B: Categorie</p>
-                      <p className="mt-1 text-gray-500">
-                        Import voegt nieuwe producten toe. Bestaande producten worden overgeslagen.
-                      </p>
-                      <p className="mt-2 text-green-600 text-xs">
-                        <strong>QR Codes:</strong> Print alle QR codes tegelijk voor labelprinter gebruik.
-                      </p>
-                      <p className="mt-1 text-blue-600 text-xs">
-                        <strong>Labelprinter:</strong> Export QR codes naar Excel/CSV voor Brother, Dymo, Zebra
-                        printers.
-                      </p>
-                    </div>
                   </div>
 
-                  {/* Search functionality */}
                   <div className="space-y-2">
                     <Label htmlFor="product-search" className="text-sm font-medium">
                       Zoek product
@@ -2208,28 +2053,6 @@ function ProductRegistrationApp() {
                     </div>
                   </div>
 
-                  <div className="text-sm text-gray-600 mb-2">
-                    {(() => {
-                      const filteredProducts = products.filter((product) => {
-                        if (!productSearchFilter) return true
-                        const searchLower = productSearchFilter.toLowerCase()
-                        const categoryName = product.categoryId
-                          ? categories.find((c) => c.id === product.categoryId)?.name || ""
-                          : ""
-
-                        return (
-                          product.name.toLowerCase().includes(searchLower) ||
-                          (product.qrcode && product.qrcode.toLowerCase().includes(searchLower)) ||
-                          categoryName.toLowerCase().includes(searchLower)
-                        )
-                      })
-
-                      return `${filteredProducts.length} van ${products.length} producten${
-                        productSearchFilter ? ` (gefilterd op "${productSearchFilter}")` : ""
-                      }`
-                    })()}
-                  </div>
-
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -2241,8 +2064,8 @@ function ProductRegistrationApp() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {(() => {
-                        const filteredProducts = products.filter((product) => {
+                      {products
+                        .filter((product) => {
                           if (!productSearchFilter) return true
                           const searchLower = productSearchFilter.toLowerCase()
                           const categoryName = product.categoryId
@@ -2255,20 +2078,7 @@ function ProductRegistrationApp() {
                             categoryName.toLowerCase().includes(searchLower)
                           )
                         })
-
-                        if (filteredProducts.length === 0) {
-                          return (
-                            <TableRow>
-                              <TableCell colSpan={5} className="text-center py-8 text-gray-500">
-                                {productSearchFilter
-                                  ? `Geen producten gevonden voor "${productSearchFilter}"`
-                                  : "Nog geen producten toegevoegd"}
-                              </TableCell>
-                            </TableRow>
-                          )
-                        }
-
-                        return filteredProducts.map((product) => (
+                        .map((product) => (
                           <TableRow key={product.id}>
                             <TableCell className="font-medium">{product.name}</TableCell>
                             <TableCell>
@@ -2280,37 +2090,18 @@ function ProductRegistrationApp() {
                               <div className="flex items-center gap-2">
                                 {product.qrcode ? (
                                   <>
-                                    <div
-                                      className="cursor-pointer"
+                                    <span className="text-xs bg-gray-100 px-2 py-1 rounded font-mono">
+                                      {product.qrcode}
+                                    </span>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
                                       onClick={() => printQRCode(product)}
-                                      title="Klik om af te drukken"
+                                      className="text-xs bg-green-50 text-green-600 border-green-200 hover:bg-green-100 h-6 px-2"
                                     >
-                                      {/* <ProfessionalQRCode qrCode={product.qrcode} size={32} /> */}
-                                    </div>
-                                    <div className="flex flex-col gap-1">
-                                      <span className="text-xs bg-gray-100 px-2 py-1 rounded font-mono">
-                                        {product.qrcode}
-                                      </span>
-                                      <div className="flex gap-1">
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          onClick={() => printQRCode(product)}
-                                          className="text-xs bg-green-50 text-green-600 border-green-200 hover:bg-green-100 h-6 px-2"
-                                        >
-                                          <Printer className="h-3 w-3 mr-1" />
-                                          Print
-                                        </Button>
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          onClick={() => generateQRCode(product)}
-                                          className="text-xs h-6 px-2"
-                                        >
-                                          🔄
-                                        </Button>
-                                      </div>
-                                    </div>
+                                      <Printer className="h-3 w-3 mr-1" />
+                                      Print
+                                    </Button>
                                   </>
                                 ) : (
                                   <Button
@@ -2387,8 +2178,7 @@ function ProductRegistrationApp() {
                               </div>
                             </TableCell>
                           </TableRow>
-                        ))
-                      })()}
+                        ))}
                     </TableBody>
                   </Table>
                 </div>
@@ -2396,6 +2186,7 @@ function ProductRegistrationApp() {
             </Card>
           </TabsContent>
 
+          {/* Continue with other tabs... */}
           <TabsContent value="categories">
             <Card className="shadow-sm">
               <CardHeader className="bg-gradient-to-r from-indigo-50 to-blue-50 border-b">
@@ -2596,7 +2387,6 @@ function ProductRegistrationApp() {
 
           <TabsContent value="statistics">
             <div className="space-y-6">
-              {/* Header */}
               <Card className="shadow-sm">
                 <CardHeader className="bg-gradient-to-r from-amber-50 to-orange-50 border-b">
                   <CardTitle className="flex items-center gap-2 text-xl">📊 Statistieken</CardTitle>
@@ -2604,7 +2394,6 @@ function ProductRegistrationApp() {
                 </CardHeader>
               </Card>
 
-              {/* Summary Cards */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <Card className="shadow-sm">
                   <CardContent className="p-6">
@@ -2632,7 +2421,6 @@ function ProductRegistrationApp() {
                 </Card>
               </div>
 
-              {/* Recent Activity */}
               <Card className="shadow-sm">
                 <CardHeader className="bg-gray-50 border-b">
                   <CardTitle className="text-xl">Recente Activiteit</CardTitle>
@@ -2655,7 +2443,7 @@ function ProductRegistrationApp() {
                           .map((registration) => (
                             <TableRow key={registration.id}>
                               <TableCell>
-                                {new Date(registration.timestamp).toLocaleDateString("nl-NL")}
+                                {new Date(registration.timestamp).toLocaleDateString("nl-NL")}{" "}
                                 {new Date(registration.timestamp).toLocaleTimeString("nl-NL", {
                                   hour: "2-digit",
                                   minute: "2-digit",
@@ -2672,9 +2460,7 @@ function ProductRegistrationApp() {
                 </CardContent>
               </Card>
 
-              {/* Top 5 Statistics */}
               <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                {/* Top 5 Gebruikers */}
                 <Card className="shadow-sm">
                   <CardHeader className="bg-gray-50 border-b">
                     <CardTitle className="text-lg">Top 5 Gebruikers</CardTitle>
@@ -2695,7 +2481,6 @@ function ProductRegistrationApp() {
                   </CardContent>
                 </Card>
 
-                {/* Top 5 Producten */}
                 <Card className="shadow-sm">
                   <CardHeader className="bg-gray-50 border-b">
                     <CardTitle className="text-lg">Top 5 Producten</CardTitle>
@@ -2716,7 +2501,6 @@ function ProductRegistrationApp() {
                   </CardContent>
                 </Card>
 
-                {/* Top 5 Locaties */}
                 <Card className="shadow-sm">
                   <CardHeader className="bg-gray-50 border-b">
                     <CardTitle className="text-lg">Top 5 Locaties</CardTitle>
@@ -2737,14 +2521,12 @@ function ProductRegistrationApp() {
                   </CardContent>
                 </Card>
 
-                {/* Top 5 Producten Pie Chart */}
                 <Card className="shadow-sm">
                   <CardHeader className="bg-gray-50 border-b">
                     <CardTitle className="text-lg">Top 5 Producten</CardTitle>
                   </CardHeader>
                   <CardContent className="p-6">
                     <div className="space-y-4">
-                      {/* Simple Pie Chart */}
                       <div className="flex justify-center">
                         <div className="relative w-32 h-32">
                           <svg viewBox="0 0 100 100" className="w-full h-full transform -rotate-90">
@@ -2784,7 +2566,6 @@ function ProductRegistrationApp() {
                         </div>
                       </div>
 
-                      {/* Legend */}
                       <div className="space-y-2">
                         {getProductChartData().map((item, index) => (
                           <div key={index} className="flex items-center gap-2 text-xs">
@@ -2841,7 +2622,7 @@ function ProductRegistrationApp() {
           </div>
         )}
 
-        {/* Edit Product Dialog */}
+        {/* Edit Dialogs */}
         <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
           <DialogContent>
             <DialogHeader>
@@ -2897,7 +2678,6 @@ function ProductRegistrationApp() {
           </DialogContent>
         </Dialog>
 
-        {/* Edit User Dialog */}
         <Dialog open={showEditUserDialog} onOpenChange={setShowEditUserDialog}>
           <DialogContent>
             <DialogHeader>
@@ -2919,7 +2699,6 @@ function ProductRegistrationApp() {
           </DialogContent>
         </Dialog>
 
-        {/* Edit Category Dialog */}
         <Dialog open={showEditCategoryDialog} onOpenChange={setShowEditCategoryDialog}>
           <DialogContent>
             <DialogHeader>
@@ -2946,7 +2725,6 @@ function ProductRegistrationApp() {
           </DialogContent>
         </Dialog>
 
-        {/* Edit Location Dialog */}
         <Dialog open={showEditLocationDialog} onOpenChange={setShowEditLocationDialog}>
           <DialogContent>
             <DialogHeader>
@@ -2968,7 +2746,6 @@ function ProductRegistrationApp() {
           </DialogContent>
         </Dialog>
 
-        {/* Edit Purpose Dialog */}
         <Dialog open={showEditPurposeDialog} onOpenChange={setShowEditPurposeDialog}>
           <DialogContent>
             <DialogHeader>
