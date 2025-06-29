@@ -107,13 +107,6 @@ function ProductRegistrationApp() {
   const [categories, setCategories] = useState<Category[]>([])
   const [registrations, setRegistrations] = useState<Registration[]>([])
 
-  // Auth user management states
-  const [authUsers, setAuthUsers] = useState<any[]>([])
-  const [newUserEmail, setNewUserEmail] = useState("")
-  const [newUserPassword, setNewUserPassword] = useState("")
-  const [editingAuthUser, setEditingAuthUser] = useState<any>(null)
-  const [showEditAuthUserDialog, setShowEditAuthUserDialog] = useState(false)
-
   // New item states
   const [newUserName, setNewUserName] = useState("")
   const [newProductName, setNewProductName] = useState("")
@@ -168,6 +161,533 @@ function ProductRegistrationApp() {
   // Product search state
   const [productSearchFilter, setProductSearchFilter] = useState("")
 
+  // Add functions
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setIsLoading(true)
+    setShowSuccess(false)
+
+    try {
+      const now = new Date()
+      const timestamp = now.toISOString()
+      const date = now.toISOString().split("T")[0]
+      const time = now.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })
+
+      const newRegistration = {
+        id: Date.now().toString(),
+        user: currentUser,
+        product: selectedProduct,
+        location: location,
+        purpose: purpose,
+        timestamp: timestamp,
+        date: date,
+        time: time,
+        qrcode: qrScanResult || undefined,
+        created_at: new Date().toISOString(),
+      }
+
+      const result = await saveRegistration(newRegistration)
+
+      if (result.error) {
+        setImportError("Fout bij opslaan registratie")
+        setTimeout(() => setImportError(""), 3000)
+      } else {
+        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
+        console.log("🔄 Forcing local registrations refresh...")
+        const refreshResult = await fetchRegistrations()
+        if (refreshResult.data) {
+          console.log("🔄 Updating local registrations state...")
+          setRegistrations(refreshResult.data)
+        }
+        setShowSuccess(true)
+        setTimeout(() => setShowSuccess(false), 3000)
+      }
+    } catch (error) {
+      setError(`Fout bij opslaan: ${error}`)
+    } finally {
+      setIsLoading(false)
+      setQrScanResult("")
+      setSelectedProduct("")
+      setProductSearchQuery("")
+    }
+  }
+
+  const startQrScanner = () => {
+    setShowQrScanner(true)
+  }
+
+  const stopQrScanner = () => {
+    setShowQrScanner(false)
+  }
+
+  const handleQrCodeDetected = (code: string) => {
+    setQrScanResult(code)
+    stopQrScanner()
+
+    if (qrScanMode === "registration") {
+      setProductSearchQuery(code)
+      setSelectedProduct(code)
+    } else if (qrScanMode === "product-management") {
+      setNewProductQrCode(code)
+    }
+  }
+
+  const getFilteredProducts = () => {
+    let filtered = products
+
+    if (selectedCategory !== "all") {
+      filtered = filtered.filter((product) => product.categoryId === selectedCategory)
+    }
+
+    if (productSearchQuery) {
+      const query = productSearchQuery.toLowerCase()
+      filtered = filtered.filter(
+        (product) =>
+          product.name.toLowerCase().includes(query) ||
+          (product.qrcode && product.qrcode.toLowerCase().includes(query)),
+      )
+    }
+
+    return filtered
+  }
+
+  const handleProductSelect = (product: Product) => {
+    setSelectedProduct(product.name)
+    setProductSearchQuery(product.name)
+    setQrScanResult(product.qrcode || "")
+    setShowProductDropdown(false)
+  }
+
+  const handleEditUser = (user: string) => {
+    setEditingUser(user)
+    setOriginalUser(user)
+    setShowEditUserDialog(true)
+  }
+
+  const handleSaveUser = async () => {
+    if (editingUser.trim() && editingUser.trim() !== originalUser) {
+      const result = await updateUser(originalUser, editingUser.trim())
+      if (result.error) {
+        setImportError("Fout bij opslaan gebruiker")
+        setTimeout(() => setImportError(""), 3000)
+      } else {
+        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
+        console.log("🔄 Forcing local users refresh...")
+        const refreshResult = await fetchUsers()
+        if (refreshResult.data) {
+          console.log("🔄 Updating local users state...")
+          setUsers(refreshResult.data)
+        }
+        setImportMessage("✅ Gebruiker aangepast!")
+        setTimeout(() => setImportMessage(""), 2000)
+      }
+      setShowEditUserDialog(false)
+    }
+  }
+
+  const handleEditProduct = (product: Product) => {
+    setEditingProduct({ ...product })
+    setOriginalProduct({ ...product })
+    setShowEditDialog(true)
+  }
+
+  const handleSaveProduct = async () => {
+    if (editingProduct && originalProduct) {
+      const result = await updateProduct(editingProduct)
+      if (result.error) {
+        setImportError("Fout bij opslaan product")
+        setTimeout(() => setImportError(""), 3000)
+      } else {
+        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
+        console.log("🔄 Forcing local products refresh...")
+        const refreshResult = await fetchProducts()
+        if (refreshResult.data) {
+          console.log("🔄 Updating local products state...")
+          setProducts(refreshResult.data)
+        }
+        setImportMessage("✅ Product aangepast!")
+        setTimeout(() => setImportMessage(""), 2000)
+      }
+      setShowEditDialog(false)
+    }
+  }
+
+  const handleEditCategory = (category: Category) => {
+    setEditingCategory({ ...category })
+    setOriginalCategory({ ...category })
+    setShowEditCategoryDialog(true)
+  }
+
+  const handleSaveCategory = async () => {
+    if (editingCategory && originalCategory) {
+      const result = await updateCategory(editingCategory)
+      if (result.error) {
+        setImportError("Fout bij opslaan categorie")
+        setTimeout(() => setImportError(""), 3000)
+      } else {
+        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
+        console.log("🔄 Forcing local categories refresh...")
+        const refreshResult = await fetchCategories()
+        if (refreshResult.data) {
+          console.log("🔄 Updating local categories state...")
+          setCategories(refreshResult.data)
+        }
+        setImportMessage("✅ Categorie aangepast!")
+        setTimeout(() => setImportMessage(""), 2000)
+      }
+      setShowEditCategoryDialog(false)
+    }
+  }
+
+  const handleEditLocation = (location: string) => {
+    setEditingLocation(location)
+    setOriginalLocation(location)
+    setShowEditLocationDialog(true)
+  }
+
+  const handleSaveLocation = async () => {
+    if (editingLocation.trim() && editingLocation.trim() !== originalLocation) {
+      const result = await updateLocation(originalLocation, editingLocation.trim())
+      if (result.error) {
+        setImportError("Fout bij opslaan locatie")
+        setTimeout(() => setImportError(""), 3000)
+      } else {
+        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
+        console.log("🔄 Forcing local locations refresh...")
+        const refreshResult = await fetchLocations()
+        if (refreshResult.data) {
+          console.log("🔄 Updating local locations state...")
+          setLocations(refreshResult.data)
+        }
+        setImportMessage("✅ Locatie aangepast!")
+        setTimeout(() => setImportMessage(""), 2000)
+      }
+      setShowEditLocationDialog(false)
+    }
+  }
+
+  const handleEditPurpose = (purpose: string) => {
+    setEditingPurpose(purpose)
+    setOriginalPurpose(purpose)
+    setShowEditPurposeDialog(true)
+  }
+
+  const handleSavePurpose = async () => {
+    if (editingPurpose.trim() && editingPurpose.trim() !== originalPurpose) {
+      const result = await updatePurpose(originalPurpose, editingPurpose.trim())
+      if (result.error) {
+        setImportError("Fout bij opslaan doel")
+        setTimeout(() => setImportError(""), 3000)
+      } else {
+        // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
+        console.log("🔄 Forcing local purposes refresh...")
+        const refreshResult = await fetchPurposes()
+        if (refreshResult.data) {
+          console.log("🔄 Updating local purposes state...")
+          setPurposes(refreshResult.data)
+        }
+        setImportMessage("✅ Doel aangepast!")
+        setTimeout(() => setImportMessage(""), 2000)
+      }
+      setShowEditPurposeDialog(false)
+    }
+  }
+
+  const handleImportExcel = async (e: any) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = async (event: any) => {
+      const text = event.target.result
+      const lines = text.split("\n")
+      const header = lines[0].split(",")
+
+      if (header.length < 1) {
+        setImportError("Ongeldig CSV formaat: kolom A: Productnaam, kolom B: Categorie")
+        setTimeout(() => setImportError(""), 3000)
+        return
+      }
+
+      const newProducts: Product[] = []
+
+      for (let i = 1; i < lines.length; i++) {
+        const data = lines[i].split(",")
+        if (data.length < 1) continue
+
+        const productName = data[0]?.trim()
+        const categoryName = data[1]?.trim()
+
+        if (!productName) continue
+
+        let categoryId: string | undefined = undefined
+        if (categoryName) {
+          const existingCategory = categories.find((c) => c.name === categoryName)
+          if (existingCategory) {
+            categoryId = existingCategory.id
+          } else {
+            // Create new category if it doesn't exist
+            const newCategoryResult = await saveCategory({ name: categoryName })
+            if (newCategoryResult.data) {
+              categoryId = newCategoryResult.data[0].id
+              // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
+              console.log("🔄 Forcing local categories refresh...")
+              const refreshResult = await fetchCategories()
+              if (refreshResult.data) {
+                console.log("🔄 Updating local categories state...")
+                setCategories(refreshResult.data)
+              }
+            }
+          }
+        }
+
+        const existingProduct = products.find((p) => p.name === productName)
+        if (!existingProduct) {
+          const newProduct: Product = {
+            id: Date.now().toString(),
+            name: productName,
+            categoryId: categoryId,
+            created_at: new Date().toISOString(),
+          }
+          newProducts.push(newProduct)
+          await saveProduct(newProduct)
+        }
+      }
+
+      // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
+      console.log("🔄 Forcing local products refresh...")
+      const refreshResult = await fetchProducts()
+      if (refreshResult.data) {
+        console.log("🔄 Updating local products state...")
+        setProducts(refreshResult.data)
+      }
+
+      setImportMessage(`✅ ${newProducts.length} producten geïmporteerd!`)
+      setTimeout(() => setImportMessage(""), 3000)
+    }
+
+    reader.onerror = () => {
+      setImportError("Fout bij lezen van bestand")
+      setTimeout(() => setImportError(""), 3000)
+    }
+
+    reader.readAsText(file)
+  }
+
+  const handleExportExcel = () => {
+    const csvRows = []
+    const header = ["Productnaam", "Categorie"]
+    csvRows.push(header.join(","))
+
+    for (const product of products) {
+      const categoryName = product.categoryId ? categories.find((c) => c.id === product.categoryId)?.name : ""
+      const values = [product.name, categoryName]
+      csvRows.push(values.join(","))
+    }
+
+    const csvString = csvRows.join("\n")
+
+    const blob = new Blob([csvString], { type: "text/csv" })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.setAttribute("href", url)
+    a.setAttribute("download", "producten.csv")
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
+
+  const printAllQRCodes = () => {
+    const productsWithQRCodes = products.filter((p) => p.qrcode)
+
+    if (productsWithQRCodes.length === 0) {
+      alert("Geen producten met QR codes gevonden")
+      return
+    }
+
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) {
+      alert("Popup blocker is actief. Sta popups toe om af te drukken.")
+      return
+    }
+
+    printWindow.document.write("<html><head><title>QR Codes</title></head><body>")
+    productsWithQRCodes.forEach((product) => {
+      printWindow.document.write(`
+          <div style="margin: 10px; text-align: center;">
+              <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${product.qrcode}" alt="${product.name}" style="margin-bottom: 5px;">
+              <p>${product.name}</p>
+          </div>
+      `)
+    })
+    printWindow.document.write("</body></html>")
+    printWindow.document.close()
+    printWindow.print()
+    printWindow.onafterprint = () => printWindow.close()
+  }
+
+  const printQRCode = (product: Product) => {
+    if (!product.qrcode) {
+      alert("Geen QR code gevonden voor dit product")
+      return
+    }
+
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) {
+      alert("Popup blocker is actief. Sta popups toe om af te drukken.")
+      return
+    }
+
+    printWindow.document.write(`
+          <html>
+          <head>
+              <title>QR Code - ${product.name}</title>
+          </head>
+          <body>
+              <div style="margin: 20px; text-align: center;">
+                  <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${product.qrcode}" alt="${product.name}" style="margin-bottom: 10px;">
+                  <p style="font-size: 16px; font-weight: bold;">${product.name}</p>
+                  <p style="font-size: 14px;">QR Code: ${product.qrcode}</p>
+              </div>
+          </body>
+          </html>
+      `)
+
+    printWindow.document.close()
+    printWindow.print()
+    printWindow.onafterprint = () => printWindow.close()
+  }
+
+  const generateQRCode = async (product: Product) => {
+    const newQrCode = `IF-${product.name.substring(0, 2)}-${Math.random().toString(36).substring(2, 7)}`
+
+    const updatedProduct = {
+      ...product,
+      qrcode: newQrCode,
+    }
+
+    const result = await updateProduct(updatedProduct)
+    if (result.error) {
+      setImportError("Fout bij genereren QR code")
+      setTimeout(() => setImportError(""), 3000)
+    } else {
+      // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
+      console.log("🔄 Forcing local products refresh...")
+      const refreshResult = await fetchProducts()
+      if (refreshResult.data) {
+        console.log("🔄 Updating local products state...")
+        setProducts(refreshResult.data)
+      }
+      setImportMessage("✅ QR Code gegenereerd!")
+      setTimeout(() => setImportMessage(""), 2000)
+    }
+  }
+
+  const exportQRCodesForLabelPrinter = () => {
+    const csvRows = []
+    const header = ["Productnaam", "QR Code"]
+    csvRows.push(header.join(","))
+
+    for (const product of products) {
+      if (product.qrcode) {
+        const values = [product.name, product.qrcode]
+        csvRows.push(values.join(","))
+      }
+    }
+
+    const csvString = csvRows.join("\n")
+
+    const blob = new Blob([csvString], { type: "text/csv" })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.setAttribute("href", url)
+    a.setAttribute("download", "qr_codes.csv")
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
+
+  const handleAttachmentUpload = async (product: Product, e: any) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    setIsLoading(true)
+
+    try {
+      const result = await uploadPDFToStorage(file)
+
+      if (result.error) {
+        setImportError("Fout bij uploaden bestand")
+        setTimeout(() => setImportError(""), 3000)
+      } else {
+        const updatedProduct = {
+          ...product,
+          attachmentUrl: result.data.path,
+          attachmentName: file.name,
+        }
+
+        const updateResult = await updateProduct(updatedProduct)
+
+        if (updateResult.error) {
+          setImportError("Fout bij opslaan product")
+          setTimeout(() => setImportError(""), 3000)
+        } else {
+          // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
+          console.log("🔄 Forcing local products refresh...")
+          const refreshResult = await fetchProducts()
+          if (refreshResult.data) {
+            console.log("🔄 Updating local products state...")
+            setProducts(refreshResult.data)
+          }
+          setImportMessage("✅ Bestand geupload!")
+          setTimeout(() => setImportMessage(""), 2000)
+        }
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleRemoveAttachment = async (product: Product) => {
+    setIsLoading(true)
+
+    try {
+      if (!product.attachmentUrl) return
+
+      const result = await deletePDFFromStorage(product.attachmentUrl)
+
+      if (result.error) {
+        setImportError("Fout bij verwijderen bestand")
+        setTimeout(() => setImportError(""), 3000)
+      } else {
+        const updatedProduct = {
+          ...product,
+          attachmentUrl: null,
+          attachmentName: null,
+        }
+
+        const updateResult = await updateProduct(updatedProduct)
+
+        if (updateResult.error) {
+          setImportError("Fout bij opslaan product")
+          setTimeout(() => setImportError(""), 3000)
+        } else {
+          // FORCE LOCAL STATE UPDATE - TOEGEVOEGD
+          console.log("🔄 Forcing local products refresh...")
+          const refreshResult = await fetchProducts()
+          if (refreshResult.data) {
+            console.log("🔄 Updating local products state...")
+            setProducts(refreshResult.data)
+          }
+          setImportMessage("✅ Bestand verwijderd!")
+          setTimeout(() => setImportMessage(""), 2000)
+        }
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   // Load data on component mount
   useEffect(() => {
     console.log("🚀 Starting app initialization...")
@@ -195,13 +715,6 @@ function ProductRegistrationApp() {
       console.log("👤 Set default user:", users[0])
     }
   }, [users, currentUser])
-
-  // Load auth users on mount
-  useEffect(() => {
-    if (isSupabaseConnected) {
-      refreshAuthUsers()
-    }
-  }, [isSupabaseConnected])
 
   const loadAllData = async () => {
     console.log("🔄 Loading all data...")
@@ -514,1175 +1027,6 @@ function ProductRegistrationApp() {
       purposesSub?.unsubscribe?.()
       categoriesSub?.unsubscribe?.()
       registrationsSub?.unsubscribe?.()
-    }
-  }
-
-  // Auth user management functions
-  const refreshAuthUsers = async () => {
-    setImportMessage("🔄 Gebruikers lijst wordt vernieuwd...")
-    const { fetchAuthUsers } = await import("@/lib/supabase")
-    const result = await fetchAuthUsers()
-
-    if (result.error) {
-      setImportError("Fout bij ophalen gebruikers")
-      setTimeout(() => setImportError(""), 3000)
-    } else {
-      setAuthUsers(result.data || [])
-      setImportMessage("✅ Gebruikers lijst vernieuwd!")
-      setTimeout(() => setImportMessage(""), 2000)
-    }
-  }
-
-  const addNewUserWithAuth = async () => {
-    if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) {
-      setImportError("Vul alle velden in")
-      setTimeout(() => setImportError(""), 3000)
-      return
-    }
-
-    if (newUserPassword.length < 6) {
-      setImportError("Wachtwoord moet minimaal 6 tekens lang zijn")
-      setTimeout(() => setImportError(""), 3000)
-      return
-    }
-
-    try {
-      setImportMessage("👤 Bezig met aanmaken gebruiker en inlog-account...")
-
-      const { createAuthUser } = await import("@/lib/supabase")
-      const result = await createAuthUser(newUserEmail.trim(), newUserPassword, newUserName.trim())
-
-      if (result.error) {
-        console.error("Error creating auth user:", result.error)
-        setImportError(`Fout bij aanmaken: ${result.error.message || "Onbekende fout"}`)
-        setTimeout(() => setImportError(""), 5000)
-      } else {
-        setImportMessage("✅ Gebruiker en inlog-account succesvol aangemaakt!")
-        setTimeout(() => setImportMessage(""), 3000)
-
-        // Reset form
-        setNewUserName("")
-        setNewUserEmail("")
-        setNewUserPassword("")
-
-        // Refresh both lists
-        await refreshAuthUsers()
-        const refreshResult = await fetchUsers()
-        if (refreshResult.data) {
-          setUsers(refreshResult.data)
-        }
-      }
-    } catch (error) {
-      console.error("Exception creating auth user:", error)
-      setImportError("Er ging iets mis bij het aanmaken van de gebruiker")
-      setTimeout(() => setImportError(""), 3000)
-    }
-  }
-
-  const removeAuthUser = async (user: any) => {
-    if (
-      !confirm(
-        `Weet je zeker dat je ${user.name} (${user.email}) wilt verwijderen? Dit verwijdert zowel de app-gebruiker als het inlog-account.`,
-      )
-    ) {
-      return
-    }
-
-    try {
-      setImportMessage("🗑️ Bezig met verwijderen gebruiker...")
-
-      const { deleteAuthUser } = await import("@/lib/supabase")
-      const result = await deleteAuthUser(user.id)
-
-      if (result.error) {
-        setImportError("Fout bij verwijderen gebruiker")
-        setTimeout(() => setImportError(""), 3000)
-      } else {
-        // Also remove from app users table
-        await removeUser(user.name)
-
-        setImportMessage("✅ Gebruiker en inlog-account verwijderd!")
-        setTimeout(() => setImportMessage(""), 2000)
-
-        // Refresh list
-        await refreshAuthUsers()
-      }
-    } catch (error) {
-      setImportError("Er ging iets mis bij het verwijderen")
-      setTimeout(() => setImportError(""), 3000)
-    }
-  }
-
-  const handleEditAuthUser = (user: any) => {
-    setEditingAuthUser({ ...user })
-    setShowEditAuthUserDialog(true)
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    if (!currentUser || !selectedProduct || !location || !purpose) {
-      return
-    }
-
-    setIsLoading(true)
-
-    try {
-      const now = new Date()
-      const product = products.find((p) => p.name === selectedProduct)
-
-      const registrationData = {
-        user_name: currentUser,
-        product_name: selectedProduct,
-        location,
-        purpose,
-        timestamp: now.toISOString(),
-        date: now.toISOString().split("T")[0],
-        time: now.toTimeString().split(" ")[0],
-        qr_code: product?.qrcode,
-      }
-
-      const result = await saveRegistration(registrationData)
-      if (result.error) {
-        console.error("Error saving registration:", result.error)
-        setImportError("Fout bij opslaan registratie")
-        setTimeout(() => setImportError(""), 3000)
-      } else {
-        console.log("✅ Registration saved")
-        // FORCE LOCAL STATE UPDATE
-        console.log("🔄 Forcing local registrations refresh...")
-        const refreshResult = await fetchRegistrations()
-        if (refreshResult.data) {
-          console.log("🔄 Updating local registrations state...")
-          setRegistrations(refreshResult.data)
-        }
-        setImportMessage("✅ Product geregistreerd!")
-        setTimeout(() => setImportMessage(""), 2000)
-      }
-
-      // Reset form
-      setSelectedProduct("")
-      setProductSearchQuery("")
-      setSelectedCategory("all")
-      setLocation("")
-      setPurpose("")
-      setQrScanResult("")
-
-      setShowSuccess(true)
-      setTimeout(() => setShowSuccess(false), 3000)
-    } catch (error) {
-      console.error("Error saving registration:", error)
-      setImportError("Fout bij opslaan registratie")
-      setTimeout(() => setImportError(""), 3000)
-    }
-
-    setIsLoading(false)
-  }
-
-  // QR Scanner functions
-  const startQrScanner = () => {
-    setShowQrScanner(true)
-  }
-
-  const stopQrScanner = () => {
-    setShowQrScanner(false)
-  }
-
-  const handleQrCodeDetected = (qrCode: string) => {
-    setQrScanResult(qrCode)
-
-    if (qrScanMode === "registration") {
-      const foundProduct = products.find((p) => p.qrcode === qrCode)
-
-      if (foundProduct) {
-        setSelectedProduct(foundProduct.name)
-        setProductSearchQuery(foundProduct.name)
-        if (foundProduct.categoryId) {
-          setSelectedCategory(foundProduct.categoryId)
-        }
-        setImportMessage(`✅ Product gevonden: ${foundProduct.name}`)
-        setTimeout(() => setImportMessage(""), 3000)
-      } else {
-        setImportError(`❌ Geen product gevonden voor QR code: ${qrCode}`)
-        setTimeout(() => setImportError(""), 3000)
-      }
-    } else if (qrScanMode === "product-management") {
-      setNewProductQrCode(qrCode)
-      setImportMessage(`✅ QR code gescand: ${qrCode}`)
-      setTimeout(() => setImportMessage(""), 3000)
-    }
-
-    stopQrScanner()
-  }
-
-  // Get filtered products for dropdown
-  const getFilteredProducts = () => {
-    const filtered = products
-      .filter((product) => {
-        if (selectedCategory === "all") return true
-        return product.categoryId === selectedCategory
-      })
-      .filter(
-        (product) =>
-          product.name.toLowerCase().includes(productSearchQuery.toLowerCase()) ||
-          (product.qrcode && product.qrcode.toLowerCase().includes(productSearchQuery.toLowerCase())),
-      )
-
-    return filtered
-  }
-
-  // Handle product selection
-  const handleProductSelect = (product: Product) => {
-    setSelectedProduct(product.name)
-    setProductSearchQuery(product.name)
-    setShowProductDropdown(false)
-  }
-
-  // Edit handlers
-  const handleEditProduct = (product: Product) => {
-    console.log("🔧 Starting product edit:", product)
-    setOriginalProduct({ ...product })
-    setEditingProduct({ ...product })
-    setShowEditDialog(true)
-  }
-
-  const handleEditUser = (user: string) => {
-    console.log("🔧 Starting user edit:", user)
-    setOriginalUser(user)
-    setEditingUser(user)
-    setShowEditUserDialog(true)
-  }
-
-  const handleEditCategory = (category: Category) => {
-    console.log("🔧 Starting category edit:", category)
-    setOriginalCategory({ ...category })
-    setEditingCategory({ ...category })
-    setShowEditCategoryDialog(true)
-  }
-
-  const handleEditLocation = (location: string) => {
-    console.log("🔧 Starting location edit:", location)
-    setOriginalLocation(location)
-    setEditingLocation(location)
-    setShowEditLocationDialog(true)
-  }
-
-  const handleEditPurpose = (purpose: string) => {
-    console.log("🔧 Starting purpose edit:", purpose)
-    setOriginalPurpose(purpose)
-    setEditingPurpose(purpose)
-    setShowEditPurposeDialog(true)
-  }
-
-  // Save handlers
-  const handleSaveProduct = async () => {
-    if (!editingProduct || !originalProduct) return
-
-    const hasChanges =
-      editingProduct.name !== originalProduct.name ||
-      editingProduct.qrcode !== originalProduct.qrcode ||
-      editingProduct.categoryId !== originalProduct.categoryId
-
-    if (!hasChanges) {
-      setShowEditDialog(false)
-      return
-    }
-
-    console.log("💾 Saving product changes:", { original: originalProduct, edited: editingProduct })
-
-    const updateData = {
-      name: editingProduct.name,
-      qr_code: editingProduct.qrcode || null,
-      category_id: editingProduct.categoryId ? Number.parseInt(editingProduct.categoryId) : null,
-      // Behoud de bestaande attachment gegevens
-      attachment_url: originalProduct.attachmentUrl || null,
-      attachment_name: originalProduct.attachmentName || null,
-    }
-
-    const result = await updateProduct(originalProduct.id, updateData)
-
-    if (result.error) {
-      console.error("❌ Error updating product:", result.error)
-      setImportError("Fout bij bijwerken product")
-      setTimeout(() => setImportError(""), 3000)
-    } else {
-      console.log("✅ Product updated successfully")
-      setImportMessage("✅ Product bijgewerkt!")
-      setTimeout(() => setImportMessage(""), 2000)
-
-      // FORCE LOCAL STATE UPDATE
-      console.log("🔄 Forcing local products refresh...")
-      const refreshResult = await fetchProducts()
-      if (refreshResult.data) {
-        console.log("🔄 Updating local products state...")
-        setProducts(refreshResult.data)
-      }
-    }
-
-    setShowEditDialog(false)
-  }
-
-  const handleSaveUser = async () => {
-    if (!editingUser.trim() || !originalUser) return
-
-    const hasChanges = editingUser.trim() !== originalUser
-    if (!hasChanges) {
-      setShowEditUserDialog(false)
-      return
-    }
-
-    console.log("💾 Saving user changes:", { original: originalUser, edited: editingUser.trim() })
-
-    const result = await updateUser(originalUser, editingUser.trim())
-
-    if (result.error) {
-      console.error("❌ Error updating user:", result.error)
-      setImportError("Fout bij bijwerken gebruiker")
-      setTimeout(() => setImportError(""), 3000)
-    } else {
-      console.log("✅ User updated successfully")
-      setImportMessage("✅ Gebruiker bijgewerkt!")
-      setTimeout(() => setImportMessage(""), 2000)
-
-      // FORCE LOCAL STATE UPDATE
-      console.log("🔄 Forcing local users refresh...")
-      const refreshResult = await fetchUsers()
-      if (refreshResult.data) {
-        console.log("🔄 Updating local users state...")
-        setUsers(refreshResult.data)
-      }
-    }
-
-    setShowEditUserDialog(false)
-  }
-
-  const handleSaveCategory = async () => {
-    if (!editingCategory || !originalCategory) return
-
-    const hasChanges = editingCategory.name.trim() !== originalCategory.name
-    if (!hasChanges) {
-      setShowEditCategoryDialog(false)
-      return
-    }
-
-    console.log("💾 Saving category changes:", { original: originalCategory, edited: editingCategory })
-
-    const result = await updateCategory(originalCategory.id, { name: editingCategory.name.trim() })
-
-    if (result.error) {
-      console.error("❌ Error updating category:", result.error)
-      setImportError("Fout bij bijwerken categorie")
-      setTimeout(() => setImportError(""), 3000)
-    } else {
-      console.log("✅ Category updated successfully")
-      setImportMessage("✅ Categorie bijgewerkt!")
-
-      setTimeout(() => setImportMessage(""), 2000)
-
-      // FORCE LOCAL STATE UPDATE
-      console.log("🔄 Forcing local categories refresh...")
-      const refreshResult = await fetchCategories()
-      if (refreshResult.data) {
-        console.log("🔄 Updating local categories state...")
-        setCategories(refreshResult.data)
-      }
-    }
-
-    setShowEditCategoryDialog(false)
-  }
-
-  const handleSaveLocation = async () => {
-    if (!editingLocation.trim() || !originalLocation) return
-
-    const hasChanges = editingLocation.trim() !== originalLocation
-    if (!hasChanges) {
-      setShowEditLocationDialog(false)
-      return
-    }
-
-    console.log("💾 Saving location changes:", { original: originalLocation, edited: editingLocation.trim() })
-
-    const result = await updateLocation(originalLocation, editingLocation.trim())
-
-    if (result.error) {
-      console.error("❌ Error updating location:", result.error)
-      setImportError("Fout bij bijwerken locatie")
-      setTimeout(() => setImportError(""), 3000)
-    } else {
-      console.log("✅ Location updated successfully")
-      setImportMessage("✅ Locatie bijgewerkt!")
-      setTimeout(() => setImportMessage(""), 2000)
-
-      // FORCE LOCAL STATE UPDATE
-      console.log("🔄 Forcing local locations refresh...")
-      const refreshResult = await fetchLocations()
-      if (refreshResult.data) {
-        console.log("🔄 Updating local locations state...")
-        setLocations(refreshResult.data)
-      }
-    }
-
-    setShowEditLocationDialog(false)
-  }
-
-  const handleSavePurpose = async () => {
-    if (!editingPurpose.trim() || !originalPurpose) return
-
-    const hasChanges = editingPurpose.trim() !== originalPurpose
-    if (!hasChanges) {
-      setShowEditPurposeDialog(false)
-      return
-    }
-
-    console.log("💾 Saving purpose changes:", { original: originalPurpose, edited: editingPurpose.trim() })
-
-    const result = await updatePurpose(originalPurpose, editingPurpose.trim())
-
-    if (result.error) {
-      console.error("❌ Error updating purpose:", result.error)
-      setImportError("Fout bij bijwerken doel")
-      setTimeout(() => setImportError(""), 3000)
-    } else {
-      console.log("✅ Purpose updated successfully")
-      setImportMessage("✅ Doel bijgewerkt!")
-      setTimeout(() => setImportMessage(""), 2000)
-
-      // FORCE LOCAL STATE UPDATE
-      console.log("🔄 Forcing local purposes refresh...")
-      const refreshResult = await fetchPurposes()
-      if (refreshResult.data) {
-        console.log("🔄 Updating local purposes state...")
-        setPurposes(refreshResult.data)
-      }
-    }
-
-    setShowEditPurposeDialog(false)
-  }
-
-  // Attachment handlers
-  const handleAttachmentUpload = async (product: Product, event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    if (file.type !== "application/pdf") {
-      setImportError("Alleen PDF bestanden zijn toegestaan")
-      setTimeout(() => setImportError(""), 3000)
-      return
-    }
-
-    if (file.size > 10 * 1024 * 1024) {
-      setImportError("Bestand is te groot (max 10MB)")
-      setTimeout(() => setImportError(""), 3000)
-      return
-    }
-
-    try {
-      setImportMessage("📎 Bezig met uploaden...")
-
-      // Upload to Supabase Storage
-      const { url: storageUrl, error: uploadError } = await uploadPDFToStorage(file, product.id)
-
-      if (uploadError || !storageUrl) {
-        setImportError("Fout bij uploaden bijlage")
-        setTimeout(() => setImportError(""), 3000)
-        return
-      }
-
-      // Update product with storage URL
-      const updateData = {
-        name: product.name,
-        qr_code: product.qrcode || null,
-        category_id: product.categoryId ? Number.parseInt(product.categoryId) : null,
-        attachment_url: storageUrl,
-        attachment_name: file.name,
-      }
-
-      const result = await updateProduct(product.id, updateData)
-
-      if (result.error) {
-        setImportError("Fout bij bijwerken product")
-        setTimeout(() => setImportError(""), 3000)
-      } else {
-        setImportMessage("✅ Bijlage toegevoegd!")
-        setTimeout(() => setImportMessage(""), 2000)
-
-        const refreshResult = await fetchProducts()
-        if (refreshResult.data) {
-          setProducts(refreshResult.data)
-        }
-      }
-    } catch (error) {
-      setImportError("Fout bij uploaden bijlage")
-      setTimeout(() => setImportError(""), 3000)
-    }
-
-    event.target.value = ""
-  }
-
-  const handleRemoveAttachment = async (product: Product) => {
-    try {
-      setImportMessage("🗑️ Bezig met verwijderen...")
-
-      // Delete from storage if it's a storage URL
-      if (product.attachmentUrl) {
-        await deletePDFFromStorage(product.attachmentUrl)
-      }
-
-      // Update product to remove attachment
-      const updateData = {
-        name: product.name,
-        qr_code: product.qrcode || null,
-        category_id: product.categoryId ? Number.parseInt(product.categoryId) : null,
-        attachment_url: null,
-        attachment_name: null,
-      }
-
-      const result = await updateProduct(product.id, updateData)
-
-      if (result.error) {
-        setImportError("Fout bij verwijderen bijlage")
-        setTimeout(() => setImportError(""), 3000)
-      } else {
-        setImportMessage("✅ Bijlage verwijderd!")
-        setTimeout(() => setImportMessage(""), 2000)
-
-        const refreshResult = await fetchProducts()
-        if (refreshResult.data) {
-          setProducts(refreshResult.data)
-        }
-      }
-    } catch (error) {
-      setImportError("Fout bij verwijderen bijlage")
-      setTimeout(() => setImportError(""), 3000)
-    }
-  }
-
-  const generateQRCode = async (product: Product) => {
-    try {
-      // Genereer een unieke QR code voor het product
-      const timestamp = Date.now()
-      const productCode = product.name.replace(/\s+/g, "").substring(0, 10).toUpperCase()
-      const uniqueQRCode = `${productCode}_${timestamp.toString().slice(-6)}`
-
-      const updateData = {
-        name: product.name,
-        qr_code: uniqueQRCode,
-        category_id: product.categoryId ? Number.parseInt(product.categoryId) : null,
-        attachment_url: product.attachmentUrl || null,
-        attachment_name: product.attachmentName || null,
-      }
-
-      setImportMessage("📱 Bezig met QR-code genereren...")
-      const result = await updateProduct(product.id, updateData)
-
-      if (result.error) {
-        setImportError("Fout bij genereren QR-code")
-        setTimeout(() => setImportError(""), 3000)
-      } else {
-        setImportMessage(`✅ QR-code gegenereerd: ${uniqueQRCode}`)
-        setTimeout(() => setImportMessage(""), 3000)
-
-        const refreshResult = await fetchProducts()
-        if (refreshResult.data) {
-          setProducts(refreshResult.data)
-        }
-      }
-    } catch (error) {
-      setImportError("Fout bij genereren QR-code")
-      setTimeout(() => setImportError(""), 3000)
-    }
-  }
-
-  // PROFESSIONELE QR-CODE GENERATIE met externe API
-  const generateRealQRCode = (text: string): string => {
-    // Gebruik QR Server API voor professionele QR-codes
-    const size = 200
-    const apiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(text)}&format=png&ecc=M`
-    return apiUrl
-  }
-
-  // Print QR code function
-  const printQRCode = async (product: Product) => {
-    if (!product.qrcode) return
-
-    try {
-      const qrImageUrl = generateRealQRCode(product.qrcode)
-
-      // Create a new window for printing
-      const printWindow = window.open("", "_blank")
-      if (!printWindow) return
-
-      printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>QR Code - ${product.name}</title>
-          <style>
-            body {
-              margin: 0;
-              padding: 20px;
-              font-family: Arial, sans-serif;
-              text-align: center;
-            }
-            .qr-container {
-              display: inline-block;
-              border: 2px solid #000;
-              padding: 10px;
-              margin: 10px;
-              background: white;
-            }
-            .qr-code {
-              width: 150px;
-              height: 150px;
-              margin-bottom: 10px;
-            }
-            .product-name {
-              font-size: 12px;
-              font-weight: bold;
-              margin-bottom: 5px;
-              word-wrap: break-word;
-              max-width: 150px;
-            }
-            .qr-text {
-              font-size: 10px;
-              font-family: monospace;
-              color: #666;
-            }
-            @media print {
-              body { margin: 0; padding: 5px; }
-              .qr-container { 
-                page-break-inside: avoid;
-                margin: 5px;
-                padding: 5px;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="qr-container">
-            <div class="product-name">${product.name}</div>
-            <img src="${qrImageUrl}" alt="QR Code" class="qr-code" />
-            <div class="qr-text">${product.qrcode}</div>
-          </div>
-          <script>
-            window.onload = function() {
-              window.print();
-              setTimeout(function() {
-                window.close();
-              }, 1000);
-            }
-          </script>
-        </body>
-      </html>
-    `)
-      printWindow.document.close()
-    } catch (error) {
-      console.error("Error generating QR code for printing:", error)
-      setImportError("Fout bij genereren QR-code voor afdrukken")
-      setTimeout(() => setImportError(""), 3000)
-    }
-  }
-
-  // Print all QR codes function - optimized for label printers
-  const printAllQRCodes = async () => {
-    try {
-      // Filter products that have QR codes
-      const productsWithQR = products.filter((product) => product.qrcode)
-
-      if (productsWithQR.length === 0) {
-        setImportError("Geen producten met QR codes gevonden")
-        setTimeout(() => setImportError(""), 3000)
-        return
-      }
-
-      setImportMessage(`📱 Bezig met voorbereiden van ${productsWithQR.length} QR codes voor afdrukken...`)
-
-      // Create a new window for printing all QR codes
-      const printWindow = window.open("", "_blank")
-      if (!printWindow) {
-        setImportError("Kon print venster niet openen")
-        setTimeout(() => setImportError(""), 3000)
-        return
-      }
-
-      // Generate QR code URLs for all products
-      const qrCodeData = productsWithQR.map((product) => ({
-        product,
-        qrImageUrl: generateRealQRCode(product.qrcode!),
-      }))
-
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Alle QR Codes - ${productsWithQR.length} labels</title>
-            <style>
-              body {
-                margin: 0;
-                padding: 10px;
-                font-family: Arial, sans-serif;
-                background: white;
-              }
-              .qr-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-                gap: 5px;
-                width: 100%;
-              }
-              .qr-container {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                border: 1px solid #000;
-                padding: 8px;
-                background: white;
-                page-break-inside: avoid;
-                width: 170px;
-                height: 220px;
-                justify-content: space-between;
-              }
-              .product-name {
-                font-size: 10px;
-                font-weight: bold;
-                text-align: center;
-                word-wrap: break-word;
-                line-height: 1.2;
-                max-height: 36px;
-                overflow: hidden;
-                margin-bottom: 5px;
-              }
-              .qr-code {
-                width: 120px;
-                height: 120px;
-                margin: 5px 0;
-              }
-              .qr-text {
-                font-size: 8px;
-                font-family: monospace;
-                color: #333;
-                text-align: center;
-                margin-top: 5px;
-              }
-              .category-text {
-                font-size: 7px;
-                color: #666;
-                text-align: center;
-                margin-top: 2px;
-              }
-              @media print {
-                body { 
-                  margin: 0; 
-                  padding: 5px; 
-                }
-                .qr-grid {
-                  gap: 2px;
-                }
-                .qr-container { 
-                  page-break-inside: avoid;
-                  margin: 2px;
-                  padding: 5px;
-                  width: 160px;
-                  height: 200px;
-                }
-                .qr-code {
-                  width: 100px;
-                  height: 100px;
-                }
-              }
-              @page {
-                margin: 10mm;
-                size: A4;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="qr-grid">
-              ${qrCodeData
-                .map(({ product, qrImageUrl }) => {
-                  const categoryName = product.categoryId
-                    ? categories.find((c) => c.id === product.categoryId)?.name || ""
-                    : ""
-
-                  return `
-                  <div class="qr-container">
-                    <div class="product-name">${product.name}</div>
-                    <img src="${qrImageUrl}" alt="QR Code" class="qr-code" />
-                    <div class="qr-text">${product.qrcode}</div>
-                    ${categoryName ? `<div class="category-text">${categoryName}</div>` : ""}
-                  </div>
-                `
-                })
-                .join("")}
-            </div>
-            <script>
-              let imagesLoaded = 0;
-              const totalImages = ${productsWithQR.length};
-              
-              // Wait for all images to load before printing
-              const images = document.querySelectorAll('.qr-code');
-              
-              function checkAllImagesLoaded() {
-                imagesLoaded++;
-                if (imagesLoaded === totalImages) {
-                  setTimeout(() => {
-                    window.print();
-                    setTimeout(() => {
-                      window.close();
-                    }, 1000);
-                  }, 500);
-                }
-              }
-              
-              images.forEach(img => {
-                if (img.complete) {
-                  checkAllImagesLoaded();
-                } else {
-                  img.onload = checkAllImagesLoaded;
-                  img.onerror = checkAllImagesLoaded;
-                }
-              });
-              
-              // Fallback: print after 5 seconds regardless
-              setTimeout(() => {
-                if (imagesLoaded < totalImages) {
-                  window.print();
-                  setTimeout(() => {
-                    window.close();
-                  }, 1000);
-                }, 5000);
-              });
-            </script>
-          </body>
-        </html>
-      `)
-      printWindow.document.close()
-
-      setImportMessage(`✅ ${productsWithQR.length} QR codes klaargezet voor afdrukken!`)
-      setTimeout(() => setImportMessage(""), 3000)
-    } catch (error) {
-      console.error("Error generating all QR codes for printing:", error)
-      setImportError("Fout bij genereren QR codes voor afdrukken")
-      setTimeout(() => setImportError(""), 3000)
-    }
-  }
-
-  // Export QR codes to Excel/CSV for label printers
-  const exportQRCodesForLabelPrinter = async () => {
-    try {
-      // Filter products that have QR codes
-      const productsWithQR = products.filter((product) => product.qrcode)
-
-      if (productsWithQR.length === 0) {
-        setImportError("Geen producten met QR codes gevonden")
-        setTimeout(() => setImportError(""), 3000)
-        return
-      }
-
-      setImportMessage(`📊 Bezig met exporteren van ${productsWithQR.length} QR codes voor labelprinter...`)
-
-      // Create comprehensive CSV content for label printers
-      const csvContent = [
-        // Header row with all necessary fields for label printer software
-        [
-          "ProductNaam",
-          "QRCode",
-          "Categorie",
-          "QRCodeURL",
-          "ProductID",
-          "CreatedDate",
-          "LabelText1",
-          "LabelText2",
-          "LabelText3",
-        ],
-        // Data rows
-        ...productsWithQR.map((product) => {
-          const categoryName = product.categoryId ? categories.find((c) => c.id === product.categoryId)?.name || "" : ""
-
-          const qrImageUrl = generateRealQRCode(product.qrcode!)
-          const createdDate = product.created_at
-            ? new Date(product.created_at).toLocaleDateString("nl-NL")
-            : new Date().toLocaleDateString("nl-NL")
-
-          return [
-            product.name, // ProductNaam
-            product.qrcode, // QRCode (text)
-            categoryName, // Categorie
-            qrImageUrl, // QRCodeURL (for image import)
-            product.id, // ProductID
-            createdDate, // CreatedDate
-            product.name, // LabelText1 (duplicate for flexibility)
-            product.qrcode, // LabelText2 (QR code text)
-            categoryName, // LabelText3 (category)
-          ]
-        }),
-      ]
-        .map((row) => row.map((cell) => `"${cell}"`).join(","))
-        .join("\n")
-
-      // Create and download file
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
-      const link = document.createElement("a")
-
-      // Generate filename with current date and count
-      const now = new Date()
-      const dateStr = now.toISOString().split("T")[0]
-      const timeStr = now.toTimeString().split(" ")[0].replace(/:/g, "")
-      const filename = `QR_Labels_Export_${dateStr}_${timeStr}_${productsWithQR.length}items.csv`
-
-      link.href = URL.createObjectURL(blob)
-      link.download = filename
-      link.style.display = "none"
-
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-
-      URL.revokeObjectURL(link.href)
-
-      setImportMessage(
-        `✅ Labelprinter export voltooid! ${productsWithQR.length} QR codes geëxporteerd naar ${filename}`,
-      )
-      setTimeout(() => setImportMessage(""), 5000)
-
-      // Also create a detailed instruction file
-      await createLabelPrinterInstructions(filename, productsWithQR.length)
-    } catch (error) {
-      console.error("Error exporting QR codes for label printer:", error)
-      setImportError("Fout bij exporteren QR codes voor labelprinter")
-      setTimeout(() => setImportError(""), 3000)
-    }
-  }
-
-  // Create instruction file for label printer setup
-  const createLabelPrinterInstructions = async (csvFilename: string, itemCount: number) => {
-    const instructions = `LABELPRINTER INSTRUCTIES
-========================
-
-Bestand: ${csvFilename}
-Aantal items: ${itemCount}
-Gegenereerd: ${new Date().toLocaleString("nl-NL")}
-
-KOLOM UITLEG:
-=============
-- ProductNaam: Volledige productnaam
-- QRCode: QR code tekst/nummer  
-- Categorie: Product categorie
-- QRCodeURL: Link naar QR code afbeelding (120x120px)
-- ProductID: Uniek product ID
-- CreatedDate: Aanmaakdatum
-- LabelText1: Extra tekstveld (productnaam)
-- LabelText2: Extra tekstveld (QR code)
-- LabelText3: Extra tekstveld (categorie)
-
-LABELPRINTER SOFTWARE SETUP:
-============================
-
-ALTEC ATP-300 PRO:
-1. Open Altec Label Designer software
-2. Ga naar File → Import Data → CSV
-3. Selecteer ${csvFilename}
-4. Map de velden:
-   - Tekst 1: ProductNaam
-   - Tekst 2: Categorie  
-   - QR Code: QRCode (tekst) of QRCodeURL (afbeelding)
-   - Barcode: QRCode
-5. Stel label afmetingen in (bijv. 25x15mm, 40x20mm)
-6. Test print 1 label voordat je batch print
-7. Voor QR afbeeldingen: gebruik QRCodeURL veld
-
-BROTHER P-TOUCH EDITOR:
-1. Open P-touch Editor
-2. Ga naar File → Import
-3. Selecteer ${csvFilename}
-4. Kies "ProductNaam" voor hoofdtekst
-5. Kies "QRCodeURL" voor QR code afbeelding
-6. Kies "Categorie" voor subtekst
-
-DYMO CONNECT:
-1. Open Dymo Connect
-2. Kies label template
-3. Ga naar Import Data
-4. Selecteer ${csvFilename}
-5. Map velden naar label elementen
-
-ZEBRA ZEBRADESIGNER:
-1. Open ZebraDesigner
-2. Create New Label
-3. Database → Connect to Database
-4. Selecteer CSV file: ${csvFilename}
-5. Drag fields naar label design
-
-ALGEMENE TIPS:
-==============
-- QR code afbeeldingen worden automatisch gedownload via URL
-- Voor Altec ATP-300 Pro: gebruik 200x200px QR codes voor beste kwaliteit
-- Test eerst met 1-2 labels voordat je alles print
-- Bewaar dit bestand samen met de CSV voor referentie
-- Bij problemen: controleer of CSV correct wordt geïmporteerd
-
-LABEL AFMETINGEN SUGGESTIES:
-===========================
-Voor Altec ATP-300 Pro:
-- Klein: 25mm x 15mm (alleen QR code + kort ID)
-- Medium: 40mm x 20mm (QR + productnaam verkort)
-- Groot: 50mm x 30mm (QR + volledige naam + categorie)
-- Extra groot: 62mm x 29mm (QR + naam + categorie + ID)
-
-ALTEC ATP-300 PRO SPECIFIEKE TIPS:
-==================================
-- Gebruik TrueType fonts voor beste leesbaarheid
-- QR code minimaal 8mm x 8mm voor betrouwbare scan
-- Stel print snelheid in op 'Medium' voor beste kwaliteit
-- Gebruik 'High Quality' mode voor QR codes
-- Test verschillende label materialen (papier/synthetisch)
-- Kalibreer printer regelmatig voor juiste positionering
-
-TROUBLESHOOTING ALTEC ATP-300 PRO:
-==================================
-- CSV niet geïmporteerd? → Controleer encoding (UTF-8)
-- QR codes niet zichtbaar? → Gebruik QRCode tekstveld ipv URL
-- Labels scheef? → Kalibreer printer via instellingen
-- Slechte kwaliteit? → Verhoog print kwaliteit en verlaag snelheid
-
-Voor vragen: bewaar dit instructiebestand!
-`
-
-    try {
-      const instructionBlob = new Blob([instructions], { type: "text/plain;charset=utf-8;" })
-      const instructionLink = document.createElement("a")
-      const instructionFilename = `QR_Labels_Instructies_${new Date().toISOString().split("T")[0]}.txt`
-
-      instructionLink.href = URL.createObjectURL(instructionBlob)
-      instructionLink.download = instructionFilename
-      instructionLink.style.display = "none"
-
-      document.body.appendChild(instructionLink)
-      instructionLink.click()
-      document.body.removeChild(instructionLink)
-
-      URL.revokeObjectURL(instructionLink.href)
-    } catch (error) {
-      console.log("Could not create instruction file, but CSV export was successful")
-    }
-  }
-
-  // Excel Import/Export functions - Browser compatible version
-  const handleImportExcel = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    try {
-      setImportMessage("📥 Bezig met importeren...")
-
-      const text = await file.text()
-      const lines = text.split("\n")
-
-      let importedCount = 0
-      let skippedCount = 0
-
-      // Skip header row and process data
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim()
-        if (!line) continue // Skip empty lines
-
-        const columns = line.split("\t") // Tab-separated or comma-separated
-        if (columns.length === 1) {
-          // Try comma separation if tab didn't work
-          columns.splice(0, 1, ...line.split(","))
-        }
-
-        const productName = columns[0]?.trim().replace(/"/g, "")
-        const categoryName = columns[1]?.trim().replace(/"/g, "") || ""
-
-        if (!productName) continue
-
-        // Check if product already exists
-        const existingProduct = products.find((p) => p.name.toLowerCase() === productName.toLowerCase())
-
-        if (existingProduct) {
-          skippedCount++
-          continue
-        }
-
-        // Find category ID
-        let categoryId: string | undefined = undefined
-        if (categoryName) {
-          const category = categories.find((c) => c.name.toLowerCase() === categoryName.toLowerCase())
-          categoryId = category?.id
-        }
-
-        // Create new product
-        const newProduct: Product = {
-          id: Date.now().toString() + i,
-          name: productName,
-          categoryId: categoryId,
-          created_at: new Date().toISOString(),
-        }
-
-        const result = await saveProduct(newProduct)
-        if (!result.error) {
-          importedCount++
-        }
-      }
-
-      // Refresh products list
-      const refreshResult = await fetchProducts()
-      if (refreshResult.data) {
-        setProducts(refreshResult.data)
-      }
-
-      setImportMessage(`✅ Import voltooid! ${importedCount} producten toegevoegd, ${skippedCount} overgeslagen.`)
-      setTimeout(() => setImportMessage(""), 5000)
-    } catch (error) {
-      console.error("Error importing file:", error)
-      setImportError("Fout bij importeren bestand")
-      setTimeout(() => setImportError(""), 3000)
-    }
-
-    // Reset file input
-    event.target.value = ""
-  }
-
-  const handleExportExcel = async () => {
-    try {
-      setImportMessage("📤 Bezig met exporteren...")
-
-      // Create CSV content
-      const csvContent = [
-        ["Productnaam", "Categorie"], // Header row
-        ...products.map((product) => [
-          product.name,
-          product.categoryId ? categories.find((c) => c.id === product.categoryId)?.name || "" : "",
-        ]),
-      ]
-        .map((row) => row.map((cell) => `"${cell}"`).join(","))
-        .join("\n")
-
-      // Create and download file
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
-      const link = document.createElement("a")
-
-      // Generate filename with current date
-      const now = new Date()
-      const dateStr = now.toISOString().split("T")[0]
-      const filename = `producten_export_${dateStr}.csv`
-
-      link.href = URL.createObjectURL(blob)
-      link.download = filename
-      link.style.display = "none"
-
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-
-      URL.revokeObjectURL(link.href)
-
-      setImportMessage(`✅ Export voltooid! ${products.length} producten geëxporteerd naar CSV.`)
-      setTimeout(() => setImportMessage(""), 3000)
-    } catch (error) {
-      console.error("Error exporting CSV:", error)
-      setImportError("Fout bij exporteren naar CSV")
-      setTimeout(() => setImportError(""), 3000)
     }
   }
 
@@ -2501,62 +1845,37 @@ Voor vragen: bewaar dit instructiebestand!
             <Card className="shadow-sm">
               <CardHeader className="bg-gradient-to-r from-green-50 to-emerald-50 border-b">
                 <CardTitle className="flex items-center gap-2 text-xl">👥 Gebruikers Beheer</CardTitle>
-                <CardDescription>
-                  Beheer gebruikers die producten kunnen registreren en hun inloggegevens
-                </CardDescription>
+                <CardDescription>Beheer gebruikers die producten kunnen registreren</CardDescription>
               </CardHeader>
               <CardContent className="p-6">
                 <div className="space-y-6">
-                  {/* Add New User Section */}
+                  {/* Add New User Section - Simple version */}
                   <Card className="border-2 border-dashed border-gray-200">
                     <CardContent className="p-4">
                       <h3 className="text-lg font-semibold mb-4">🆕 Nieuwe Gebruiker Toevoegen</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        <div>
+                      <div className="flex gap-4">
+                        <div className="flex-1">
                           <Label className="text-sm font-medium">Naam</Label>
                           <Input
                             placeholder="Volledige naam"
                             value={newUserName}
                             onChange={(e) => setNewUserName(e.target.value)}
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-sm font-medium">Email</Label>
-                          <Input
-                            type="email"
-                            placeholder="email@dematic.com"
-                            value={newUserEmail}
-                            onChange={(e) => setNewUserEmail(e.target.value)}
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-sm font-medium">Wachtwoord</Label>
-                          <Input
-                            type="password"
-                            placeholder="Minimaal 6 tekens"
-                            value={newUserPassword}
-                            onChange={(e) => setNewUserPassword(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && addNewUser()}
                           />
                         </div>
                         <div className="flex items-end">
                           <Button
-                            onClick={addNewUserWithAuth}
-                            disabled={
-                              !newUserName.trim() ||
-                              !newUserEmail.trim() ||
-                              !newUserPassword.trim() ||
-                              newUserPassword.length < 6
-                            }
-                            className="w-full flex items-center gap-2"
+                            onClick={addNewUser}
+                            disabled={!newUserName.trim()}
+                            className="flex items-center gap-2"
                           >
                             <Plus className="h-4 w-4" />
-                            Gebruiker + Login Toevoegen
+                            Gebruiker Toevoegen
                           </Button>
                         </div>
                       </div>
                       <div className="mt-2 text-xs text-gray-600">
-                        <p>💡 Dit maakt zowel een app-gebruiker als een inlog-account aan in Supabase</p>
-                        <p>🔒 Wachtwoord moet minimaal 6 tekens lang zijn</p>
+                        <p>💡 Dit voegt een gebruiker toe die producten kan registreren</p>
                       </div>
                     </CardContent>
                   </Card>
@@ -2574,69 +1893,59 @@ Voor vragen: bewaar dit instructiebestand!
                           className="pl-10"
                         />
                       </div>
-                      <Button
-                        variant="outline"
-                        onClick={refreshAuthUsers}
-                        className="flex items-center gap-2 bg-transparent"
-                      >
-                        🔄 Ververs Lijst
-                      </Button>
                     </div>
 
                     {/* Users List */}
                     <div className="space-y-2">
                       <div className="text-sm text-gray-600 mb-2">
-                        {authUsers.length > 0
-                          ? `${authUsers.length} gebruikers met inlog-accounts`
-                          : "Geen gebruikers gevonden"}
+                        {getFilteredAndSortedUsers().length} van {users.length} gebruikers
                       </div>
 
-                      {authUsers.length === 0 ? (
+                      {getFilteredAndSortedUsers().length === 0 ? (
                         <div className="text-center py-8 text-gray-500">
                           <div className="text-4xl mb-2">👤</div>
-                          <p>Geen gebruikers gevonden</p>
-                          <p className="text-sm mt-2">Voeg hierboven een nieuwe gebruiker toe</p>
+                          <p>
+                            {userSearchQuery
+                              ? `Geen gebruikers gevonden voor "${userSearchQuery}"`
+                              : users.length === 0
+                                ? "Geen gebruikers gevonden"
+                                : "Geen gebruikers gevonden met deze zoekopdracht"}
+                          </p>
+                          {users.length === 0 && (
+                            <p className="text-sm mt-2">Voeg hierboven een nieuwe gebruiker toe</p>
+                          )}
                         </div>
                       ) : (
                         <div className="grid gap-3">
-                          {authUsers
-                            .filter(
-                              (user) =>
-                                user.name.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
-                                user.email.toLowerCase().includes(userSearchQuery.toLowerCase()),
-                            )
-                            .map((user) => (
-                              <div
-                                key={user.id}
-                                className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border"
-                              >
-                                <div className="flex-1">
-                                  <div className="font-medium text-gray-900">{user.name}</div>
-                                  <div className="text-sm text-gray-600">{user.email}</div>
-                                  <div className="text-xs text-gray-500">
-                                    Aangemaakt: {new Date(user.created_at).toLocaleDateString("nl-NL")}
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Button
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() => handleEditAuthUser(user)}
-                                    className="bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100"
-                                  >
-                                    <Edit className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => removeAuthUser(user)}
-                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
+                          {getFilteredAndSortedUsers().map((user) => (
+                            <div
+                              key={user}
+                              className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border"
+                            >
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">{user}</div>
+                                <div className="text-sm text-gray-600">App gebruiker</div>
                               </div>
-                            ))}
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => handleEditUser(user)}
+                                  className="bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100"
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => removeUser(user)}
+                                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
