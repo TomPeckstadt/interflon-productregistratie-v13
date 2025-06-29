@@ -859,13 +859,14 @@ export const createAuthUser = async (email: string, password: string, name: stri
     console.log("🔐 Creating auth user in Supabase:", { email, name })
 
     // Create user in Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
-      user_metadata: {
-        name: name,
+      options: {
+        data: {
+          name: name,
+        },
       },
-      email_confirm: true, // Auto-confirm email for internal users
     })
 
     if (authError) {
@@ -873,10 +874,13 @@ export const createAuthUser = async (email: string, password: string, name: stri
       return { data: null, error: authError }
     }
 
-    console.log("✅ Auth user created successfully")
+    console.log("✅ Auth user created successfully:", authData)
 
     // Also add to users table for app functionality
     const userResult = await saveUser(name)
+    if (userResult.error) {
+      console.warn("⚠️ Auth user created but failed to add to users table:", userResult.error)
+    }
 
     return {
       data: {
