@@ -168,10 +168,7 @@ function LoginForm() {
         {loading ? "Bezig met inloggen..." : "Inloggen"}
       </button>
 
-      <div className="text-center text-sm text-gray-600">
-        <p>Test account voor preview:</p>
-        <p className="font-mono text-xs">admin@example.com / InterfLon2024!Demo</p>
-      </div>
+      
     </form>
   )
 }
